@@ -19,6 +19,7 @@ public class FraudDetectionService {
     private final PdfAnalyzer pdfAnalyzer;
     private final SiretVerificationService siretService;
     private final SalaryCalculationService salaryService;
+    private final AiAnalysisService aiAnalysisService;
     private final UserRepository userRepository;
     private final AnalysisRepository analysisRepository;
 
@@ -28,11 +29,13 @@ public class FraudDetectionService {
     public FraudDetectionService(PdfAnalyzer pdfAnalyzer,
                                   SiretVerificationService siretService,
                                   SalaryCalculationService salaryService,
+                                  AiAnalysisService aiAnalysisService,
                                   UserRepository userRepository,
                                   AnalysisRepository analysisRepository) {
         this.pdfAnalyzer = pdfAnalyzer;
         this.siretService = siretService;
         this.salaryService = salaryService;
+        this.aiAnalysisService = aiAnalysisService;
         this.userRepository = userRepository;
         this.analysisRepository = analysisRepository;
     }
@@ -47,10 +50,15 @@ public class FraudDetectionService {
 
         List<AnalysisResult.Check> allChecks = new ArrayList<>();
 
+        // Rule-based analysis
         PdfAnalyzer.PdfAnalysisData pdfData = pdfAnalyzer.analyze(file.getInputStream());
         allChecks.addAll(pdfData.metadataChecks());
         allChecks.add(siretService.verify(pdfData.documentInfo().getSiret()));
         allChecks.addAll(salaryService.analyzeCalculations(pdfData.rawText()));
+
+        // AI analysis (GPT-4) — optional, runs only if API key is configured
+        List<AnalysisResult.Check> aiChecks = aiAnalysisService.analyze(pdfData.rawText(), pdfData.documentInfo());
+        allChecks.addAll(aiChecks);
 
         int score = computeScore(allChecks);
         String verdict = computeVerdict(score);
@@ -68,6 +76,7 @@ public class FraudDetectionService {
             .checks(allChecks).documentInfo(pdfData.documentInfo())
             .remainingDocuments(user.remainingFreeDocuments(freeLimit))
             .isPro(user.getPlan() == User.Plan.PRO)
+            .aiEnabled(aiAnalysisService.isEnabled())
             .build();
     }
 

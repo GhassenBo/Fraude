@@ -265,6 +265,43 @@
   color: var(--red);
 }
 
+/* ── AI Analysis styles ── */
+.ai-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  margin-bottom: 18px;
+  padding: 5px 12px;
+  background: rgba(139, 92, 246, 0.1);
+  border: 1px solid rgba(139, 92, 246, 0.35);
+  border-radius: 20px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: #a78bfa;
+  letter-spacing: 0.5px;
+}
+
+.ai-badge-icon {
+  font-size: 10px;
+  color: #a78bfa;
+}
+
+.ai-cat-icon {
+  color: #a78bfa;
+  font-size: 11px;
+}
+
+.summary-card.ai-card {
+  border-color: rgba(139, 92, 246, 0.3);
+  background: linear-gradient(135deg, var(--bg2) 0%, rgba(139, 92, 246, 0.05) 100%);
+}
+
+.ai-section .category-title {
+  color: #a78bfa;
+  border-bottom-color: rgba(139, 92, 246, 0.3);
+}
+
 @media (max-width: 640px) {
   .score-hero {
     flex-direction: column;

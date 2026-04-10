@@ -10,7 +10,13 @@ export default function ResultPage({ result, filename, onReset }) {
     ? 'var(--orange)'
     : 'var(--red)';
 
+  const AI_CATEGORY = 'Analyse IA';
   const categories = [...new Set(result.checks?.map(c => c.category) || [])];
+  // Ensure AI category always appears last
+  const orderedCategories = [
+    ...categories.filter(c => c !== AI_CATEGORY),
+    ...categories.filter(c => c === AI_CATEGORY),
+  ];
 
   return (
     <main className="result-page">
@@ -24,6 +30,11 @@ export default function ResultPage({ result, filename, onReset }) {
           <div className="score-verdict" style={{ color: scoreColor }}>
             {result.verdict}
           </div>
+          {result.aiEnabled && (
+            <div className="ai-badge">
+              <span className="ai-badge-icon">✦</span> Analyse GPT-4 activée
+            </div>
+          )}
           <div className="score-desc">
             {result.verdict === 'AUTHENTIQUE' && "Le document présente les caractéristiques d'un bulletin de salaire authentique."}
             {result.verdict === 'SUSPECT' && "Des anomalies ont été détectées. Une vérification manuelle est recommandée."}
@@ -54,7 +65,7 @@ export default function ResultPage({ result, filename, onReset }) {
       {activeTab === 'overview' && (
         <div className="tab-content">
           <div className="checks-summary">
-            {categories.map(cat => {
+            {orderedCategories.map(cat => {
               const catChecks = result.checks.filter(c => c.category === cat);
               const failed = catChecks.filter(c => c.status === 'FAILED').length;
               const warnings = catChecks.filter(c => c.status === 'WARNING').length;
@@ -62,9 +73,11 @@ export default function ResultPage({ result, filename, onReset }) {
               const status = failed > 0 ? 'FAILED' : warnings > 0 ? 'WARNING' : 'OK';
 
               return (
-                <div key={cat} className={`summary-card status-${status.toLowerCase()}`}>
+                <div key={cat} className={`summary-card status-${status.toLowerCase()}${cat === AI_CATEGORY ? ' ai-card' : ''}`}>
                   <div className="summary-header">
-                    <span className="summary-cat">{cat}</span>
+                    <span className="summary-cat">
+                      {cat === AI_CATEGORY && <span className="ai-cat-icon">✦ </span>}{cat}
+                    </span>
                     <StatusBadge status={status} />
                   </div>
                   <div className="summary-counts">
@@ -92,9 +105,11 @@ export default function ResultPage({ result, filename, onReset }) {
       {/* Details Tab */}
       {activeTab === 'details' && (
         <div className="tab-content">
-          {categories.map(cat => (
-            <div key={cat} className="category-section">
-              <h3 className="category-title">{cat}</h3>
+          {orderedCategories.map(cat => (
+            <div key={cat} className={`category-section${cat === AI_CATEGORY ? ' ai-section' : ''}`}>
+              <h3 className="category-title">
+                {cat === AI_CATEGORY && <span className="ai-cat-icon">✦ </span>}{cat}
+              </h3>
               {result.checks.filter(c => c.category === cat).map((check, i) => (
                 <CheckItem key={i} check={check} />
               ))}
