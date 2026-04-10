@@ -1,0 +1,99 @@
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  border-bottom: 1px solid var(--border);
+  background: rgba(10,10,15,0.8);
+  backdrop-filter: blur(20px);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.header-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 18px 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 2px;
+}
+
+.logo-icon {
+  color: var(--accent);
+  font-size: 22px;
+  animation: pulse 3s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.logo-accent { color: var(--accent); }
+
+.header-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  letter-spacing: 0.5px;
+}
+
+.badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 8px var(--green);
+  animation: blink 2s infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.header-nav { display: flex; gap: 4px; }
+.nav-link {
+  padding: 7px 14px;
+  background: transparent; border: none;
+  color: var(--text-muted); font-family: var(--font-sans);
+  font-size: 13px; cursor: pointer; border-radius: 6px;
+  transition: all 0.2s;
+}
+.nav-link:hover, .nav-link.active { color: var(--text); background: var(--bg3); }
+.nav-link.active { color: var(--accent); }
+
+.header-user { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: flex-end; }
+.plan-badge {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 1.5px;
+  padding: 3px 9px; border-radius: 4px; font-weight: 700;
+}
+.plan-badge.pro { background: rgba(124,58,237,0.2); color: #a78bfa; border: 1px solid rgba(124,58,237,0.4); }
+.plan-badge.free { background: rgba(107,114,128,0.15); color: var(--text-muted); border: 1px solid var(--border); }
+.docs-left { font-size: 12px; color: var(--text-muted); font-family: var(--font-mono); }
+.user-email { font-size: 12px; color: var(--text-muted); }
+.logout-btn {
+  padding: 6px 12px; border: 1px solid var(--border);
+  border-radius: 6px; background: transparent;
+  color: var(--text-muted); font-size: 12px; cursor: pointer;
+  transition: all 0.2s;
+}
+.logout-btn:hover { border-color: var(--red); color: var(--red); }
+.badge-dot-wrap { display: flex; align-items: center; gap: 8px; }
