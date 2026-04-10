@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import UploadPage from './pages/UploadPage';
 import ResultPage from './pages/ResultPage';
+import BatchResultPage from './pages/BatchResultPage';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import DashboardPage from './pages/DashboardPage';
@@ -13,6 +14,7 @@ export default function App() {
   const [page, setPage] = useState('upload');
   const [result, setResult] = useState(null);
   const [filename, setFilename] = useState('');
+  const [batchResult, setBatchResult] = useState(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -31,6 +33,7 @@ export default function App() {
     setUser(null);
     setPage('upload');
     setResult(null);
+    setBatchResult(null);
   };
 
   const handleResult = (data, name) => {
@@ -42,7 +45,12 @@ export default function App() {
     }
   };
 
-  const handleReset = () => { setResult(null); setPage('upload'); };
+  const handleBatchResult = (data) => {
+    setBatchResult(data);
+    setPage('batch-result');
+  };
+
+  const handleReset = () => { setResult(null); setBatchResult(null); setPage('upload'); };
 
   if (!user && page === 'upload') {
     return <div className="app"><Header user={user} onLogout={handleLogout} onNav={setPage} /><LoginPage onLogin={handleLogin} onRegister={() => setPage('register')} /></div>;
@@ -54,8 +62,9 @@ export default function App() {
   return (
     <div className="app">
       <Header user={user} onLogout={handleLogout} onNav={setPage} currentPage={page} />
-      {page === 'upload' && <UploadPage onResult={handleResult} user={user} onUpgrade={() => setPage('pricing')} />}
+      {page === 'upload' && <UploadPage onResult={handleResult} onBatchResult={handleBatchResult} user={user} onUpgrade={() => setPage('pricing')} />}
       {page === 'result' && <ResultPage result={result} filename={filename} onReset={handleReset} onUpgrade={() => setPage('pricing')} />}
+      {page === 'batch-result' && <BatchResultPage batchResult={batchResult} onReset={handleReset} onUpgrade={() => setPage('pricing')} />}
       {page === 'dashboard' && <DashboardPage user={user} onUpgrade={() => setPage('pricing')} onAnalyze={() => setPage('upload')} />}
       {page === 'pricing' && <PricingPage user={user} onBack={() => setPage('upload')} />}
     </div>

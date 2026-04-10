@@ -3,6 +3,7 @@ package com.frauddetect.service;
 import com.frauddetect.entity.Analysis;
 import com.frauddetect.entity.User;
 import com.frauddetect.model.AnalysisResult;
+import com.frauddetect.model.BatchAnalysisResult;
 import com.frauddetect.repository.AnalysisRepository;
 import com.frauddetect.repository.UserRepository;
 import com.frauddetect.util.PdfAnalyzer;
@@ -12,6 +13,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 public class FraudDetectionService {
@@ -77,6 +79,34 @@ public class FraudDetectionService {
             .remainingDocuments(user.remainingFreeDocuments(freeLimit))
             .isPro(user.getPlan() == User.Plan.PRO)
             .aiEnabled(aiAnalysisService.isEnabled())
+            .build();
+    }
+
+    public BatchAnalysisResult analyzeBatch(List<MultipartFile> files, User user) throws Exception {
+        int count = files.size();
+        if (!user.canAnalyzeMultiple(count, freeLimit)) {
+            int remaining = user.remainingFreeDocuments(freeLimit);
+            throw new QuotaExceededException(
+                "Quota insuffisant : " + remaining + " analyse(s) disponible(s) pour " + count + " documents. " +
+                "Passez au plan Pro pour des analyses illimitées."
+            );
+        }
+
+        List<AnalysisResult> results = new ArrayList<>();
+        List<String> filenames = new ArrayList<>();
+        for (MultipartFile file : files) {
+            results.add(analyze(file, user));
+            filenames.add(file.getOriginalFilename());
+        }
+
+        int globalScore = results.stream().mapToInt(AnalysisResult::getScore).min().orElse(0);
+        return BatchAnalysisResult.builder()
+            .globalScore(globalScore)
+            .globalVerdict(computeVerdict(globalScore))
+            .globalColor(computeColor(globalScore))
+            .documentsAnalyzed(count)
+            .results(results)
+            .filenames(filenames)
             .build();
     }
 

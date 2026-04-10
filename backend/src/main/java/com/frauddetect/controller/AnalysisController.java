@@ -3,6 +3,7 @@ package com.frauddetect.controller;
 import com.frauddetect.entity.Analysis;
 import com.frauddetect.entity.User;
 import com.frauddetect.model.AnalysisResult;
+import com.frauddetect.model.BatchAnalysisResult;
 import com.frauddetect.service.FraudDetectionService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -45,6 +46,36 @@ public class AnalysisController {
         } catch (Exception e) {
             return ResponseEntity.internalServerError()
                 .body(Map.of("error", "Erreur lors de l'analyse : " + e.getMessage()));
+        }
+    }
+
+    @PostMapping("/analyze/batch")
+    public ResponseEntity<?> analyzeBatch(
+        @RequestParam("files") List<MultipartFile> files,
+        @AuthenticationPrincipal User user
+    ) {
+        if (files == null || files.isEmpty())
+            return ResponseEntity.badRequest().body(Map.of("error", "Aucun fichier fourni"));
+
+        if (files.size() > 10)
+            return ResponseEntity.badRequest().body(Map.of("error", "Maximum 10 fichiers par lot"));
+
+        for (MultipartFile file : files) {
+            String filename = file.getOriginalFilename();
+            if (filename == null || !filename.toLowerCase().endsWith(".pdf"))
+                return ResponseEntity.badRequest().body(Map.of("error", "Seuls les fichiers PDF sont acceptés : " + filename));
+            if (file.getSize() > 10 * 1024 * 1024)
+                return ResponseEntity.badRequest().body(Map.of("error", "Fichier trop volumineux (max 10MB) : " + filename));
+        }
+
+        try {
+            BatchAnalysisResult result = fraudDetectionService.analyzeBatch(files, user);
+            return ResponseEntity.ok(result);
+        } catch (FraudDetectionService.QuotaExceededException e) {
+            return ResponseEntity.status(402).body(Map.of("error", e.getMessage(), "quotaExceeded", true));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError()
+                .body(Map.of("error", "Erreur lors de l'analyse du lot : " + e.getMessage()));
         }
     }
 

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { exportAnalysisPdf } from '../services/pdfExport';
 import './ResultPage.css';
 
 export default function ResultPage({ result, filename, onReset }) {
@@ -40,9 +41,14 @@ export default function ResultPage({ result, filename, onReset }) {
             {result.verdict === 'SUSPECT' && "Des anomalies ont été détectées. Une vérification manuelle est recommandée."}
             {result.verdict === 'FRAUDULEUX' && "Plusieurs indicateurs critiques de fraude ont été identifiés dans ce document."}
           </div>
-          <button className="new-analysis-btn" onClick={onReset}>
-            ← Nouvelle analyse
-          </button>
+          <div className="result-actions">
+            <button className="new-analysis-btn" onClick={onReset}>
+              ← Nouvelle analyse
+            </button>
+            <button className="export-btn" onClick={() => exportAnalysisPdf(result, filename)}>
+              ↓ Exporter PDF
+            </button>
+          </div>
         </div>
       </div>
 
