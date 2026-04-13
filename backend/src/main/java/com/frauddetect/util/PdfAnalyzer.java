@@ -46,6 +46,13 @@ public class PdfAnalyzer {
         "ag2r", "apec", "fafiec", "opco", "prev", "soin", "tranche"
     );
 
+    // Document-type titles — must not be matched as employee names
+    private static final List<String> DOCUMENT_TITLE_KEYWORDS = List.of(
+        "bulletin de paie", "bulletin de salaire", "fiche de paie",
+        "fiche de salaire", "bulletin de solde", "bulletin de rémunération",
+        "bulletin de remuneration"
+    );
+
     public record PdfAnalysisData(
         String rawText,
         AnalysisResult.DocumentInfo documentInfo,
@@ -151,19 +158,28 @@ public class PdfAnalyzer {
                                                               String creationDate, String modDate,
                                                               boolean wasModified, int pageCount) {
         String[] lines = text.split("\\r?\\n");
+
+        String brutStr = extractAmountNearLabel(lines,
+            "salaire brut", "rémunération brute", "rémunération brut",
+            "total rémunération brute", "total rémunération brut",
+            "brut total", "total brut", "brut fiscal", "brut :");
+        String netStr = extractAmountNearLabel(lines,
+            "net à payer", "net a payer", "net payé", "net paye",
+            "net versé", "net verse", "net imposable", "net fiscal",
+            "net avant impôt", "net avant impot");
+
+        // Sanity check: net cannot exceed brut on a payslip — discard if impossible
+        if (brutStr != null && netStr != null && parseAmount(netStr) > parseAmount(brutStr)) {
+            netStr = null;
+        }
+
         return AnalysisResult.DocumentInfo.builder()
             .employeur(extractEmployeur(text, lines))
             .siret(extractSiret(text))
             .employe(extractEmploye(text, lines))
             .periode(extractPeriode(text, lines))
-            .salaireBrut(extractAmountNearLabel(lines,
-                "salaire brut", "rémunération brute", "rémunération brut",
-                "total rémunération brute", "total rémunération brut",
-                "brut total", "total brut", "brut fiscal", "brut :"))
-            .salaireNet(extractAmountNearLabel(lines,
-                "net à payer", "net a payer", "net payé", "net paye",
-                "net versé", "net verse", "net imposable", "net fiscal",
-                "net avant impôt", "net avant impot"))
+            .salaireBrut(brutStr)
+            .salaireNet(netStr)
             .pdfCreatedWith(producer.isBlank() ? "Inconnu" : producer)
             .pdfCreationDate(creationDate)
             .pdfModifiedDate(modDate)
@@ -214,8 +230,10 @@ public class PdfAnalyzer {
         if (candidate.isBlank() || candidate.length() < 4) return false;
         if (candidate.matches("\\d.*")) return false;                        // starts with digit = address/number
         if (candidate.matches(".*\\b\\d{5}\\b.*")) return false;             // contains postal code
+        String lower = candidate.toLowerCase();
+        if (lower.contains("siret") || lower.contains("siren")) return false; // SIRET line itself
         if (isTableHeader(candidate)) return false;
-        if (isInstitutionName(candidate.toLowerCase())) return false;
+        if (isInstitutionName(lower)) return false;
         if (Pattern.compile("[A-ZÀÂÉÈÊÎÔÙÛÇ]{3,}").matcher(candidate).find()) return true;
         return false;
     }
@@ -253,10 +271,14 @@ public class PdfAnalyzer {
                 next.toLowerCase().contains("chemin") || next.toLowerCase().contains("impasse");
             if (nextIsAddress) {
                 String candidate = lines[i].trim();
+                String lowerCand = candidate.toLowerCase();
                 // Must look like "BORGI Ghassen" — starts uppercase, has a space, no digits
-                if (candidate.matches("[A-ZÀÂÉÈÊÎÔÙÛÇ]{2,}\\s+[A-Za-zÀ-ÿ\\-]{2,}.*")
+                // Skip document titles like "BULLETIN DE PAIE"
+                boolean isDocTitle = DOCUMENT_TITLE_KEYWORDS.stream().anyMatch(lowerCand::contains);
+                if (!isDocTitle
+                        && candidate.matches("[A-ZÀÂÉÈÊÎÔÙÛÇ]{2,}\\s+[A-Za-zÀ-ÿ\\-]{2,}.*")
                         && !candidate.matches(".*\\d.*")
-                        && !isInstitutionName(candidate.toLowerCase())
+                        && !isInstitutionName(lowerCand)
                         && candidate.length() >= 5 && candidate.length() <= 60) {
                     return candidate;
                 }
@@ -359,7 +381,8 @@ public class PdfAnalyzer {
     }
 
     private double parseAmount(String formatted) {
-        try { return Double.parseDouble(formatted.replaceAll("[\\s\u00a0]", "").replace(",", ".")); }
+        if (formatted == null) return -1;
+        try { return Double.parseDouble(formatted.replaceAll("[\\s\u00a0€]", "").replace(",", ".")); }
         catch (Exception e) { return -1; }
     }
 
