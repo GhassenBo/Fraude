@@ -19,14 +19,20 @@ public class SalaryCalculationService {
 
     public List<AnalysisResult.Check> analyzeCalculations(String text) {
         List<AnalysisResult.Check> checks = new ArrayList<>();
+        String[] lines = text.split("\\r?\\n");
 
-        // Multiple patterns to handle different payroll software formats (Sage, URSSAF TESE, ADP, etc.)
-        Double salaireBrut = extractFirstMontant(text,
-            "(?i)(?:salaire\\s*brut|r[eé]mun[eé]ration\\s*brut[e]?|total\\s*r[eé]mun[eé]ration\\s*brut[e]?|brut\\s+total|total\\s+brut)[\\s\\t:€]*([\\d][\\d\\s,.]*)");
-        Double salaireNet = extractFirstMontant(text,
-            "(?i)(?:net\\s+[àa]\\s+payer|net\\s+pay[eé]|net\\s+vers[eé]|net\\s+imposable|net\\s+fiscal)[\\s\\t:€]*([\\d][\\d\\s,.]*)");
-        Double totalCotisations = extractFirstMontant(text,
-            "(?i)(?:total\\s+cotisations|total\\s+retenues|total\\s+pr[eé]l[eè]vements)[\\s\\t:€]*([\\d][\\d\\s,.]*)");
+        // Line-by-line extraction handles multi-column PDF table layouts (URSSAF TESE, Sage, ADP, etc.)
+        Double salaireBrut = extractAmountNearLabel(lines,
+            "salaire brut", "rémunération brute", "rémunération brut",
+            "total rémunération brute", "total rémunération brut",
+            "brut total", "total brut", "salaire de base");
+        Double salaireNet = extractAmountNearLabel(lines,
+            "net à payer", "net a payer", "net payé", "net paye",
+            "net versé", "net verse", "net imposable", "net fiscal",
+            "net avant impôt", "net avant impot");
+        Double totalCotisations = extractAmountNearLabel(lines,
+            "total cotisations", "total retenues", "total prélèvements",
+            "total prelevements", "total charges salariales");
 
 
         // Check 1: Brut vs Net ratio
@@ -170,17 +176,42 @@ public class SalaryCalculationService {
         return checks;
     }
 
-    private Double extractFirstMontant(String text, String regex) {
-        try {
-            Matcher m = Pattern.compile(regex).matcher(text);
-            if (m.find()) {
-                String raw = m.group(m.groupCount())
-                    .replaceAll("\\s", "")
-                    .replace(",", ".")
-                    .replaceAll("[^0-9.]", "");
-                if (!raw.isBlank()) return Double.parseDouble(raw);
+    /**
+     * Searches each line for a label keyword, then extracts a monetary amount
+     * from the same line or the line immediately following.
+     * This handles PDF table layouts where label and value are in separate columns.
+     */
+    private Double extractAmountNearLabel(String[] lines, String... labels) {
+        for (int i = 0; i < lines.length; i++) {
+            String lower = lines[i].toLowerCase();
+            for (String label : labels) {
+                if (lower.contains(label.toLowerCase())) {
+                    Double amount = parseMonetaryAmount(lines[i]);
+                    if (amount != null) return amount;
+                    if (i + 1 < lines.length) {
+                        amount = parseMonetaryAmount(lines[i + 1]);
+                        if (amount != null) return amount;
+                    }
+                }
             }
-        } catch (Exception ignored) {}
+        }
+        return null;
+    }
+
+    /**
+     * Finds the first plausible salary amount (≥100, ≤200000) in a line of text.
+     * Handles French number format: "3 224,64" or "3224.64" or "3 224.64".
+     */
+    private Double parseMonetaryAmount(String line) {
+        // Match numbers: optional thousands separator (space or nbsp), decimal comma or dot
+        Matcher m = Pattern.compile("([0-9]{1,3}(?:[\\s\u00a0][0-9]{3})*(?:[.,][0-9]{1,2})?)").matcher(line);
+        while (m.find()) {
+            String raw = m.group(1).replaceAll("[\\s\u00a0]", "").replace(",", ".");
+            try {
+                double val = Double.parseDouble(raw);
+                if (val >= 100 && val <= 200000) return val;
+            } catch (NumberFormatException ignored) {}
+        }
         return null;
     }
 }
