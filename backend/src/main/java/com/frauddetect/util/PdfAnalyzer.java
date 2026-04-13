@@ -31,6 +31,12 @@ public class PdfAnalyzer {
         "gimp", "canva", "google docs", "pages", "inkscape"
     );
 
+    // Words that appear in table headers — not a valid company name
+    private static final List<String> TABLE_HEADER_WORDS = List.of(
+        "taux", "montant", "base", "salariale", "patronale", "employeur",
+        "cotisation", "brut", "net", "total"
+    );
+
     public record PdfAnalysisData(
         String rawText,
         AnalysisResult.DocumentInfo documentInfo,
@@ -79,7 +85,7 @@ public class PdfAnalyzer {
                     .category("Métadonnées")
                     .label("Logiciel de création")
                     .status("WARNING")
-                    .detail("Logiciel non reconnu : " + (producer.isBlank() && creator.isBlank() ? "Inconnu" : producer + " " + creator))
+                    .detail("Logiciel non reconnu : " + (producer.isBlank() && creator.isBlank() ? "Inconnu" : (producer + " " + creator).trim()))
                     .build());
             }
 
@@ -117,9 +123,7 @@ public class PdfAnalyzer {
                     .build());
             }
 
-            // Extract document info from text
             AnalysisResult.DocumentInfo docInfo = extractDocumentInfo(rawText, producer, creationDate, modDate, wasModified, pageCount);
-
             return new PdfAnalysisData(rawText, docInfo, checks);
         }
     }
@@ -127,13 +131,14 @@ public class PdfAnalyzer {
     private AnalysisResult.DocumentInfo extractDocumentInfo(String text, String producer,
                                                               String creationDate, String modDate,
                                                               boolean wasModified, int pageCount) {
+        String[] lines = text.split("\\r?\\n");
         return AnalysisResult.DocumentInfo.builder()
-            .employeur(extractField(text, "(?i)(employeur|société|entreprise|raison sociale)[\\s:]*([A-Z][^\\n]{2,50})"))
+            .employeur(extractEmployeur(text, lines))
             .siret(extractSiret(text))
-            .employe(extractField(text, "(?i)(nom|salarié|employé)[\\s:]*([A-Z][A-Z\\s-]{2,40})"))
-            .periode(extractField(text, "(?i)(période|mois|du)[\\s:]*([A-Za-zéàû]+\\s+\\d{4})"))
-            .salaireBrut(extractMontant(text, "(?i)(?:salaire\\s*brut|r[eé]mun[eé]ration\\s*brut[e]?|total\\s*r[eé]mun[eé]ration\\s*brut[e]?|brut\\s+total|total\\s+brut)[\\s\\t:€]*([\\d][\\d\\s,.]*)"))
-            .salaireNet(extractMontant(text, "(?i)(?:net\\s+[àa]\\s+payer|net\\s+pay[eé]|net\\s+vers[eé]|net\\s+imposable|net\\s+fiscal)[\\s\\t:€]*([\\d][\\d\\s,.]*)"))
+            .employe(extractEmploye(text, lines))
+            .periode(extractPeriode(text, lines))
+            .salaireBrut(extractAmountNearLabel(lines, "salaire brut", "rémunération brute", "rémunération brut", "total rémunération brute", "total rémunération brut", "brut total", "total brut"))
+            .salaireNet(extractAmountNearLabel(lines, "net à payer", "net a payer", "net payé", "net paye", "net versé", "net verse", "net imposable", "net fiscal"))
             .pdfCreatedWith(producer.isBlank() ? "Inconnu" : producer)
             .pdfCreationDate(creationDate)
             .pdfModifiedDate(modDate)
@@ -142,31 +147,145 @@ public class PdfAnalyzer {
             .build();
     }
 
-    private String extractField(String text, String regex) {
-        try {
-            Matcher m = Pattern.compile(regex).matcher(text);
-            if (m.find() && m.groupCount() >= 2) return m.group(2).trim();
-        } catch (Exception ignored) {}
+    // ── Employeur ─────────────────────────────────────────────────────────────
+
+    private String extractEmployeur(String text, String[] lines) {
+        // 1. Prefer "Raison sociale : <NAME>" — most explicit label
+        for (String line : lines) {
+            Matcher m = Pattern.compile("(?i)raison\\s+soci[ae]le\\s*[:\\s]+(.+)").matcher(line);
+            if (m.find()) {
+                String name = m.group(1).trim();
+                if (!name.isBlank() && name.length() > 2 && !isTableHeader(name)) return name;
+            }
+        }
+        // 2. Look for a known legal entity prefix (SAS, SARL, etc.)
+        Matcher m = Pattern.compile("(?m)\\b((?:SAS|SARL|SA|SCI|SASU|EURL|EIRL|SNC|SCP|SCOP)\\s+[A-ZÀÂÉÈÊÎÔÙÛÇ][A-ZÀÂÉÈÊÎÔÙÛÇ\\s&\\-']{1,60})").matcher(text);
+        if (m.find()) return m.group(1).trim();
+        // 3. Fall back: first non-table-header uppercase word group after "EMPLOYEUR" label
+        for (int i = 0; i < lines.length; i++) {
+            if (lines[i].toLowerCase().contains("employeur") || lines[i].toLowerCase().contains("l'employeur")) {
+                for (int j = i + 1; j < Math.min(i + 5, lines.length); j++) {
+                    String candidate = lines[j].trim();
+                    if (!candidate.isBlank() && candidate.length() > 3 && !isTableHeader(candidate)) {
+                        if (candidate.matches("[A-ZÀÂÉÈÊÎÔÙÛÇ][A-ZÀÂÉÈÊÎÔÙÛÇ\\s&\\-']+")) return candidate;
+                    }
+                }
+            }
+        }
         return null;
     }
 
-    private String extractSiret(String text) {
-        Matcher m = Pattern.compile("(?i)siret[\\s:]*([0-9]{14}|[0-9]{3}\\s[0-9]{3}\\s[0-9]{3}\\s[0-9]{5})").matcher(text);
-        if (m.find()) return m.group(1).replaceAll("\\s", "");
-        // Try raw 14-digit number
-        m = Pattern.compile("\\b([0-9]{14})\\b").matcher(text);
+    private boolean isTableHeader(String text) {
+        String lower = text.toLowerCase();
+        int matches = 0;
+        for (String word : TABLE_HEADER_WORDS) {
+            if (lower.contains(word)) matches++;
+        }
+        return matches >= 2;
+    }
+
+    // ── Employé ───────────────────────────────────────────────────────────────
+
+    private String extractEmploye(String text, String[] lines) {
+        // 1. "Monsieur / Madame <FIRSTNAME LASTNAME>" — addressee block
+        Matcher m = Pattern.compile("(?i)(?:Monsieur|Madame|M\\.?|Mme\\.?)\\s+([A-ZÀÂÉÈÊÎÔÙÛÇ][A-ZÀÂÉÈÊÎÔÙÛÇ\\s\\-]{2,50})").matcher(text);
+        if (m.find()) {
+            String name = m.group(1).trim();
+            // Exclude address lines
+            if (!name.toLowerCase().contains("rue") && !name.toLowerCase().contains("avenue")
+                    && !name.toLowerCase().contains("boulevard") && !name.toLowerCase().contains("allée")) {
+                return name;
+            }
+        }
+        // 2. Extract Prénom + Nom from label lines
+        String prenom = null, nom = null;
+        for (String line : lines) {
+            if (prenom == null) {
+                Matcher pm = Pattern.compile("(?i)pr[eé]nom\\s*[:\\s]+([A-ZÀÂÉÈÊÎÔÙÛÇ][A-Za-zÀ-ÿ\\-]+)").matcher(line);
+                if (pm.find()) prenom = pm.group(1).trim();
+            }
+            if (nom == null) {
+                // "Nom :" but NOT "Nom de" / "Nombre" to avoid false matches
+                Matcher nm = Pattern.compile("(?i)\\bnom\\s*[:\\s]+([A-ZÀÂÉÈÊÎÔÙÛÇ][A-Za-zÀ-ÿ\\-]+)").matcher(line);
+                if (nm.find()) nom = nm.group(1).trim();
+            }
+        }
+        if (prenom != null && nom != null) return prenom + " " + nom;
+        if (prenom != null) return prenom;
+        if (nom != null) return nom;
+        return null;
+    }
+
+    // ── Période ───────────────────────────────────────────────────────────────
+
+    private String extractPeriode(String text, String[] lines) {
+        // Match "novembre 2025" or "Novembre 2025"
+        Matcher m = Pattern.compile("(?i)(janvier|f[eé]vrier|mars|avril|mai|juin|juillet|ao[uû]t|septembre|octobre|novembre|d[eé]cembre)\\s+(20\\d{2})").matcher(text);
+        if (m.find()) return capitalize(m.group(1)) + " " + m.group(2);
+        // Match "du 01/11/2025 au 30/11/2025" or "du 01/11/25 au 30/11/25"
+        m = Pattern.compile("(?i)p[eé]riode[^\\n]{0,30}du\\s+(\\d{1,2}[/.]\\d{1,2}[/.]\\d{2,4})").matcher(text);
+        if (m.find()) return "du " + m.group(1);
+        // Match "Salaire versé le 30/11/2025"
+        m = Pattern.compile("(?i)salaire\\s+vers[eé]\\s+le\\s+(\\d{1,2}[/.]\\d{1,2}[/.]\\d{2,4})").matcher(text);
         if (m.find()) return m.group(1);
         return null;
     }
 
-    private String extractMontant(String text, String regex) {
-        try {
-            Matcher m = Pattern.compile(regex).matcher(text);
-            if (m.find() && m.groupCount() >= 2) {
-                String raw = m.group(2).trim().replaceAll("\\s", "");
-                return raw + " €";
+    private String capitalize(String s) {
+        if (s == null || s.isEmpty()) return s;
+        return s.substring(0, 1).toUpperCase() + s.substring(1).toLowerCase();
+    }
+
+    // ── Amount near label ─────────────────────────────────────────────────────
+
+    /**
+     * Finds a monetary amount on the same line as a label, or on the immediately
+     * following line. Handles multi-column PDF table layouts.
+     */
+    private String extractAmountNearLabel(String[] lines, String... labels) {
+        for (int i = 0; i < lines.length; i++) {
+            String lower = lines[i].toLowerCase();
+            for (String label : labels) {
+                if (lower.contains(label.toLowerCase())) {
+                    // Try same line first
+                    String amount = findMonetaryAmount(lines[i]);
+                    if (amount != null) return amount + " €";
+                    // Try next line
+                    if (i + 1 < lines.length) {
+                        amount = findMonetaryAmount(lines[i + 1]);
+                        if (amount != null) return amount + " €";
+                    }
+                }
             }
-        } catch (Exception ignored) {}
+        }
+        return null;
+    }
+
+    /**
+     * Extracts the first plausible salary amount (100–200000) from a line of text.
+     */
+    private String findMonetaryAmount(String text) {
+        // Match numbers like "3 224,64" or "3224.64" or "3224,64" or "3 224.64"
+        Matcher m = Pattern.compile("([0-9]{1,3}(?:[\\s\u00a0][0-9]{3})*(?:[.,][0-9]{1,2})?)").matcher(text);
+        while (m.find()) {
+            String raw = m.group(1).replaceAll("[\\s\u00a0]", "").replace(",", ".");
+            try {
+                double val = Double.parseDouble(raw);
+                if (val >= 100 && val <= 200000) return m.group(1).trim();
+            } catch (NumberFormatException ignored) {}
+        }
+        return null;
+    }
+
+    // ── SIRET ─────────────────────────────────────────────────────────────────
+
+    private String extractSiret(String text) {
+        // Explicit "SIRET : XXXXXXXXXXXXXX" label
+        Matcher m = Pattern.compile("(?i)siret\\s*[:\\s]+([0-9]{3}[\\s]?[0-9]{3}[\\s]?[0-9]{3}[\\s]?[0-9]{5})").matcher(text);
+        if (m.find()) return m.group(1).replaceAll("\\s", "");
+        // Bare 14-digit number
+        m = Pattern.compile("\\b([0-9]{14})\\b").matcher(text);
+        if (m.find()) return m.group(1);
         return null;
     }
 }
