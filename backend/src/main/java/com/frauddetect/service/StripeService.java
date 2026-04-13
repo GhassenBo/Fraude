@@ -4,17 +4,16 @@ import com.frauddetect.entity.User;
 import com.frauddetect.repository.UserRepository;
 import com.stripe.Stripe;
 import com.stripe.exception.StripeException;
-import com.stripe.model.*;
-import com.stripe.model.checkout.Session;
+import com.stripe.model.Customer;
+import com.stripe.model.Event;
+import com.stripe.model.Subscription;
 import com.stripe.net.Webhook;
 import com.stripe.param.CustomerCreateParams;
-import com.stripe.param.checkout.SessionCreateParams;
 import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
-import java.util.Map;
 
 @Service
 public class StripeService {
@@ -58,12 +57,12 @@ public class StripeService {
         }
 
         // Create checkout session
-        Session session = Session.create(
-            SessionCreateParams.builder()
-                .setMode(SessionCreateParams.Mode.SUBSCRIPTION)
+        com.stripe.model.checkout.Session checkoutSession = com.stripe.model.checkout.Session.create(
+            com.stripe.param.checkout.SessionCreateParams.builder()
+                .setMode(com.stripe.param.checkout.SessionCreateParams.Mode.SUBSCRIPTION)
                 .setCustomer(customerId)
                 .addLineItem(
-                    SessionCreateParams.LineItem.builder()
+                    com.stripe.param.checkout.SessionCreateParams.LineItem.builder()
                         .setPrice(priceId)
                         .setQuantity(1L)
                         .build()
@@ -73,18 +72,18 @@ public class StripeService {
                 .build()
         );
 
-        return session.getUrl();
+        return checkoutSession.getUrl();
     }
 
     public String createPortalSession(User user) throws StripeException {
-        com.stripe.param.BillingPortalSessionCreateParams params =
-            com.stripe.param.BillingPortalSessionCreateParams.builder()
+        com.stripe.param.billingportal.SessionCreateParams params =
+            com.stripe.param.billingportal.SessionCreateParams.builder()
                 .setCustomer(user.getStripeCustomerId())
                 .setReturnUrl(baseUrl + "/dashboard")
                 .build();
 
-        com.stripe.model.BillingPortalSession portalSession =
-            com.stripe.model.BillingPortalSession.create(params);
+        com.stripe.model.billingportal.Session portalSession =
+            com.stripe.model.billingportal.Session.create(params);
 
         return portalSession.getUrl();
     }
@@ -99,8 +98,9 @@ public class StripeService {
 
         switch (event.getType()) {
             case "checkout.session.completed" -> {
-                Session session = (Session) event.getDataObjectDeserializer()
-                    .getObject().orElseThrow();
+                com.stripe.model.checkout.Session session =
+                    (com.stripe.model.checkout.Session) event.getDataObjectDeserializer()
+                        .getObject().orElseThrow();
                 handleCheckoutCompleted(session);
             }
             case "customer.subscription.deleted" -> {
@@ -111,7 +111,7 @@ public class StripeService {
         }
     }
 
-    private void handleCheckoutCompleted(Session session) {
+    private void handleCheckoutCompleted(com.stripe.model.checkout.Session session) {
         String customerId = session.getCustomer();
         userRepository.findByStripeCustomerId(customerId).ifPresent(user -> {
             user.setPlan(User.Plan.PRO);
