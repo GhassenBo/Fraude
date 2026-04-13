@@ -21,18 +21,19 @@ public class SalaryCalculationService {
         List<AnalysisResult.Check> checks = new ArrayList<>();
         String[] lines = text.split("\\r?\\n");
 
-        // Line-by-line extraction handles multi-column PDF table layouts (URSSAF TESE, Sage, ADP, etc.)
+        // Line-by-line extraction — returns LARGEST amount within 3 lines of the label
         Double salaireBrut = extractAmountNearLabel(lines,
             "salaire brut", "rémunération brute", "rémunération brut",
             "total rémunération brute", "total rémunération brut",
-            "brut total", "total brut", "salaire de base");
+            "brut total", "total brut", "brut fiscal", "brut :");
         Double salaireNet = extractAmountNearLabel(lines,
             "net à payer", "net a payer", "net payé", "net paye",
             "net versé", "net verse", "net imposable", "net fiscal",
             "net avant impôt", "net avant impot");
         Double totalCotisations = extractAmountNearLabel(lines,
             "total cotisations", "total retenues", "total prélèvements",
-            "total prelevements", "total charges salariales");
+            "total prelevements", "total charges salariales",
+            "total des cotisations");
 
 
         // Check 1: Brut vs Net ratio
@@ -177,41 +178,40 @@ public class SalaryCalculationService {
     }
 
     /**
-     * Searches each line for a label keyword, then extracts a monetary amount
-     * from the same line or the line immediately following.
-     * This handles PDF table layouts where label and value are in separate columns.
+     * Searches for a label, then returns the LARGEST monetary amount found
+     * within the same line + up to 3 following lines.
+     * "Largest" heuristic avoids picking up small incidental numbers (hours, %)
+     * and correctly identifies the salary total in multi-row labels like
+     * "NET A PAYER AVANT IMPOT SUR\nLE REVENU\n1563,67".
      */
     private Double extractAmountNearLabel(String[] lines, String... labels) {
+        Double best = null;
         for (int i = 0; i < lines.length; i++) {
             String lower = lines[i].toLowerCase();
+            boolean found = false;
             for (String label : labels) {
-                if (lower.contains(label.toLowerCase())) {
-                    Double amount = parseMonetaryAmount(lines[i]);
-                    if (amount != null) return amount;
-                    if (i + 1 < lines.length) {
-                        amount = parseMonetaryAmount(lines[i + 1]);
-                        if (amount != null) return amount;
-                    }
-                }
+                if (lower.contains(label.toLowerCase())) { found = true; break; }
+            }
+            if (!found) continue;
+            for (int j = i; j <= Math.min(i + 3, lines.length - 1); j++) {
+                Double val = largestAmountInLine(lines[j]);
+                if (val != null && (best == null || val > best)) best = val;
             }
         }
-        return null;
+        return best;
     }
 
-    /**
-     * Finds the first plausible salary amount (≥100, ≤200000) in a line of text.
-     * Handles French number format: "3 224,64" or "3224.64" or "3 224.64".
-     */
-    private Double parseMonetaryAmount(String line) {
-        // Match numbers: optional thousands separator (space or nbsp), decimal comma or dot
+    /** Returns the LARGEST plausible salary amount (100–200 000) found in a single line. */
+    private Double largestAmountInLine(String line) {
         Matcher m = Pattern.compile("([0-9]{1,3}(?:[\\s\u00a0][0-9]{3})*(?:[.,][0-9]{1,2})?)").matcher(line);
+        Double best = null;
         while (m.find()) {
             String raw = m.group(1).replaceAll("[\\s\u00a0]", "").replace(",", ".");
             try {
                 double val = Double.parseDouble(raw);
-                if (val >= 100 && val <= 200000) return val;
+                if (val >= 100 && val <= 200000 && (best == null || val > best)) best = val;
             } catch (NumberFormatException ignored) {}
         }
-        return null;
+        return best;
     }
 }

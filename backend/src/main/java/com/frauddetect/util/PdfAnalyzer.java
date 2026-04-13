@@ -156,8 +156,14 @@ public class PdfAnalyzer {
             .siret(extractSiret(text))
             .employe(extractEmploye(text, lines))
             .periode(extractPeriode(text, lines))
-            .salaireBrut(extractAmountNearLabel(lines, "salaire brut", "rémunération brute", "rémunération brut", "total rémunération brute", "total rémunération brut", "brut total", "total brut"))
-            .salaireNet(extractAmountNearLabel(lines, "net à payer", "net a payer", "net payé", "net paye", "net versé", "net verse", "net imposable", "net fiscal"))
+            .salaireBrut(extractAmountNearLabel(lines,
+                "salaire brut", "rémunération brute", "rémunération brut",
+                "total rémunération brute", "total rémunération brut",
+                "brut total", "total brut", "brut fiscal", "brut :"))
+            .salaireNet(extractAmountNearLabel(lines,
+                "net à payer", "net a payer", "net payé", "net paye",
+                "net versé", "net verse", "net imposable", "net fiscal",
+                "net avant impôt", "net avant impot"))
             .pdfCreatedWith(producer.isBlank() ? "Inconnu" : producer)
             .pdfCreationDate(creationDate)
             .pdfModifiedDate(modDate)
@@ -177,21 +183,41 @@ public class PdfAnalyzer {
                 if (!name.isBlank() && name.length() > 2 && !isTableHeader(name)) return name;
             }
         }
-        // 2. Look for a known legal entity prefix (SAS, SARL, etc.)
-        Matcher m = Pattern.compile("(?m)\\b((?:SAS|SARL|SA|SCI|SASU|EURL|EIRL|SNC|SCP|SCOP)\\s+[A-ZÀÂÉÈÊÎÔÙÛÇ][A-ZÀÂÉÈÊÎÔÙÛÇ\\s&\\-']{1,60})").matcher(text);
-        if (m.find()) return m.group(1).trim();
-        // 3. Fall back: first non-table-header uppercase word group after "EMPLOYEUR" label
+        // 2. Legal entity prefix (SAS, SARL, etc.) — limit to first 25 lines to avoid cotisations
+        for (int i = 0; i < Math.min(25, lines.length); i++) {
+            Matcher m = Pattern.compile("\\b((?:SAS|SARL|SA|SCI|SASU|EURL|EIRL|SNC|SCP|SCOP)\\s+[A-ZÀÂÉÈÊÎÔÙÛÇ][A-ZÀÂÉÈÊÎÔÙÛÇ\\s&\\-']{1,60})").matcher(lines[i]);
+            if (m.find()) return m.group(1).trim();
+        }
+        // 3. Company name is almost always just above the SIRET line
         for (int i = 0; i < lines.length; i++) {
-            if (lines[i].toLowerCase().contains("employeur") || lines[i].toLowerCase().contains("l'employeur")) {
-                for (int j = i + 1; j < Math.min(i + 5, lines.length); j++) {
+            String lower = lines[i].toLowerCase();
+            if (lower.contains("siret") || lower.contains("siren")) {
+                for (int j = Math.max(0, i - 4); j < i; j++) {
                     String candidate = lines[j].trim();
-                    if (!candidate.isBlank() && candidate.length() > 3 && !isTableHeader(candidate)) {
-                        if (candidate.matches("[A-ZÀÂÉÈÊÎÔÙÛÇ][A-ZÀÂÉÈÊÎÔÙÛÇ\\s&\\-']+")) return candidate;
-                    }
+                    if (isValidCompanyName(candidate)) return candidate;
                 }
             }
         }
+        // 4. First 6 non-blank lines heuristic: company name is at the very top of most bulletins
+        int count = 0;
+        for (String line : lines) {
+            String candidate = line.trim();
+            if (candidate.isBlank()) continue;
+            if (++count > 6) break;
+            if (isValidCompanyName(candidate)) return candidate;
+        }
         return null;
+    }
+
+    /** Returns true if the line looks like a company name (not an address, not a table header, not an institution) */
+    private boolean isValidCompanyName(String candidate) {
+        if (candidate.isBlank() || candidate.length() < 4) return false;
+        if (candidate.matches("\\d.*")) return false;                        // starts with digit = address/number
+        if (candidate.matches(".*\\b\\d{5}\\b.*")) return false;             // contains postal code
+        if (isTableHeader(candidate)) return false;
+        if (isInstitutionName(candidate.toLowerCase())) return false;
+        if (Pattern.compile("[A-ZÀÂÉÈÊÎÔÙÛÇ]{3,}").matcher(candidate).find()) return true;
+        return false;
     }
 
     private boolean isTableHeader(String text) {
@@ -206,16 +232,34 @@ public class PdfAnalyzer {
     // ── Employé ───────────────────────────────────────────────────────────────
 
     private String extractEmploye(String text, String[] lines) {
-        // 1. "Monsieur / Madame <FIRSTNAME LASTNAME>" — addressee block
-        Matcher m = Pattern.compile("(?i)(?:Monsieur|Madame|M\\.?|Mme\\.?)\\s+([A-ZÀÂÉÈÊÎÔÙÛÇ][A-ZÀÂÉÈÊÎÔÙÛÇ\\s\\-]{2,50})").matcher(text);
+        // 1. Explicit "Monsieur" / "Madame" / "Mme" title — NOT short "M." which is too ambiguous
+        Matcher m = Pattern.compile("(?i)(?:Monsieur|Madame|Mme\\.?)\\s+([A-ZÀÂÉÈÊÎÔÙÛÇ][A-ZÀÂÉÈÊÎÔÙÛÇ\\s\\-]{2,50})").matcher(text);
         while (m.find()) {
             String name = m.group(1).trim();
             String lower = name.toLowerCase();
-            // Exclude address lines and institution names
             if (!lower.contains("rue") && !lower.contains("avenue")
                     && !lower.contains("boulevard") && !lower.contains("allée")
                     && !isInstitutionName(lower)) {
                 return name;
+            }
+        }
+        // 1b. "LASTNAME Firstname" pattern near an address line (name appears just above address)
+        for (int i = 0; i < lines.length - 1; i++) {
+            String next = lines[i + 1].trim();
+            // next line is an address if it starts with a number or contains "rue","boulevard","avenue","allée"
+            boolean nextIsAddress = next.matches("^\\d+.*") ||
+                next.toLowerCase().contains("rue") || next.toLowerCase().contains("boulevard") ||
+                next.toLowerCase().contains("avenue") || next.toLowerCase().contains("allée") ||
+                next.toLowerCase().contains("chemin") || next.toLowerCase().contains("impasse");
+            if (nextIsAddress) {
+                String candidate = lines[i].trim();
+                // Must look like "BORGI Ghassen" — starts uppercase, has a space, no digits
+                if (candidate.matches("[A-ZÀÂÉÈÊÎÔÙÛÇ]{2,}\\s+[A-Za-zÀ-ÿ\\-]{2,}.*")
+                        && !candidate.matches(".*\\d.*")
+                        && !isInstitutionName(candidate.toLowerCase())
+                        && candidate.length() >= 5 && candidate.length() <= 60) {
+                    return candidate;
+                }
             }
         }
         // 2. Extract Prénom + Nom from label lines, skipping institution names
@@ -270,26 +314,53 @@ public class PdfAnalyzer {
     // ── Amount near label ─────────────────────────────────────────────────────
 
     /**
-     * Finds a monetary amount on the same line as a label, or on the immediately
-     * following line. Handles multi-column PDF table layouts.
+     * Finds the best monetary amount near a label.
+     * Scans same line + up to 3 following lines, returns the LARGEST amount found.
+     * "Largest" heuristic avoids small incidental numbers (hours, percentages)
+     * and favours the actual salary total.
      */
     private String extractAmountNearLabel(String[] lines, String... labels) {
+        String bestRaw = null;
+        double bestVal = -1;
+
         for (int i = 0; i < lines.length; i++) {
             String lower = lines[i].toLowerCase();
+            boolean labelFound = false;
             for (String label : labels) {
-                if (lower.contains(label.toLowerCase())) {
-                    // Try same line first
-                    String amount = findMonetaryAmount(lines[i]);
-                    if (amount != null) return amount + " €";
-                    // Try next line
-                    if (i + 1 < lines.length) {
-                        amount = findMonetaryAmount(lines[i + 1]);
-                        if (amount != null) return amount + " €";
-                    }
+                if (lower.contains(label.toLowerCase())) { labelFound = true; break; }
+            }
+            if (!labelFound) continue;
+
+            // Collect amounts from same line and next 3 lines
+            for (int j = i; j <= Math.min(i + 3, lines.length - 1); j++) {
+                String candidate = findLargestMonetaryAmount(lines[j]);
+                if (candidate != null) {
+                    double val = parseAmount(candidate);
+                    if (val > bestVal) { bestVal = val; bestRaw = candidate; }
                 }
             }
         }
-        return null;
+        return bestRaw != null ? bestRaw + " €" : null;
+    }
+
+    /** Returns the LARGEST monetary amount (100–200000) found in the line. */
+    private String findLargestMonetaryAmount(String text) {
+        Matcher m = Pattern.compile("([0-9]{1,3}(?:[\\s\u00a0][0-9]{3})*(?:[.,][0-9]{1,2})?)").matcher(text);
+        String best = null;
+        double bestVal = -1;
+        while (m.find()) {
+            String raw = m.group(1).replaceAll("[\\s\u00a0]", "").replace(",", ".");
+            try {
+                double val = Double.parseDouble(raw);
+                if (val >= 100 && val <= 200000 && val > bestVal) { bestVal = val; best = m.group(1).trim(); }
+            } catch (NumberFormatException ignored) {}
+        }
+        return best;
+    }
+
+    private double parseAmount(String formatted) {
+        try { return Double.parseDouble(formatted.replaceAll("[\\s\u00a0]", "").replace(",", ".")); }
+        catch (Exception e) { return -1; }
     }
 
     /**
