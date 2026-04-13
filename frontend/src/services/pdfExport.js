@@ -16,6 +16,25 @@ const C = {
 const W = 210;
 const M = 20; // margin
 
+/**
+ * Sanitize text for jsPDF/Helvetica which only supports Latin-1 (ISO-8859-1).
+ * - Strips diacritics via NFD decomposition (é→e, ô→o, ç→c, etc.)
+ * - Replaces unsupported symbols with ASCII equivalents
+ */
+function s(str) {
+  if (str == null) return '';
+  return String(str)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')   // strip combining diacritical marks
+    .replace(/[—–]/g, '-')
+    .replace(/['']/g, "'")
+    .replace(/[""«»]/g, '"')
+    .replace(/✓/g, '+')
+    .replace(/✕/g, 'x')
+    .replace(/✦/g, '*')
+    .replace(/[^\x00-\xFF]/g, '?');    // fallback for remaining non-Latin-1
+}
+
 function scoreColor(color) {
   if (color === 'green')  return C.green;
   if (color === 'orange') return C.orange;
@@ -45,7 +64,7 @@ function drawHeader(doc, subtitle) {
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
-  doc.text(subtitle, W - M, 9.5, { align: 'right' });
+  doc.text(s(subtitle), W - M, 9.5, { align: 'right' });
 }
 
 function drawFooter(doc) {
@@ -55,15 +74,15 @@ function drawFooter(doc) {
   doc.setFontSize(7.5);
   doc.setTextColor(...C.muted);
   doc.text(
-    'Généré par FraudDetect — Ce rapport est fourni à titre indicatif et ne constitue pas un avis juridique.',
+    s('Genere par FraudDetect - Ce rapport est fourni a titre indicatif et ne constitue pas un avis juridique.'),
     M, 292
   );
-  doc.text(new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' }), W - M, 292, { align: 'right' });
+  doc.text(s(new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })), W - M, 292, { align: 'right' });
 }
 
 function newPage(doc) {
   doc.addPage();
-  drawHeader(doc, 'Rapport d\'analyse (suite)');
+  drawHeader(doc, "Rapport d'analyse (suite)");
   return 24;
 }
 
@@ -82,7 +101,7 @@ export function exportAnalysisPdf(result, filename) {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(12);
   doc.setTextColor(...C.text);
-  doc.text(filename || 'bulletin.pdf', M, y);
+  doc.text(s(filename || 'bulletin.pdf'), M, y);
   y += 12;
 
   // Score block
@@ -105,13 +124,13 @@ export function exportAnalysisPdf(result, filename) {
   doc.setFontSize(16);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(...sc);
-  doc.text(result.verdict, M + 40, y + 12);
+  doc.text(s(result.verdict), M + 40, y + 12);
 
   const desc = result.verdict === 'AUTHENTIQUE'
-    ? 'Le document présente les caractéristiques d\'un bulletin authentique.'
+    ? "Le document presente les caracteristiques d'un bulletin authentique."
     : result.verdict === 'SUSPECT'
-    ? 'Des anomalies ont été détectées. Vérification manuelle recommandée.'
-    : 'Plusieurs indicateurs critiques de fraude ont été identifiés.';
+    ? 'Des anomalies ont ete detectees. Verification manuelle recommandee.'
+    : 'Plusieurs indicateurs critiques de fraude ont ete identifies.';
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
   doc.setTextColor(...C.muted);
@@ -145,11 +164,11 @@ export function exportAnalysisPdf(result, filename) {
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(7.5);
       doc.setTextColor(...C.muted);
-      doc.text(label, x, ry);
+      doc.text(s(label), x, ry);
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(9);
       doc.setTextColor(...C.text);
-      doc.text(String(value || '—'), x, ry + 5);
+      doc.text(s(String(value || '-')), x, ry + 5);
     });
     y += Math.ceil(fields.length / 2) * 13 + 6;
   }
@@ -177,7 +196,7 @@ export function exportAnalysisPdf(result, filename) {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(7.5);
     doc.setTextColor(...(isAI ? C.purple : C.muted));
-    doc.text((isAI ? '✦  ' : '') + cat.toUpperCase(), M, y);
+    doc.text((isAI ? '*  ' : '') + s(cat.toUpperCase()), M, y);
     y += 5;
 
     for (const check of result.checks.filter(c => c.category === cat)) {
@@ -196,14 +215,14 @@ export function exportAnalysisPdf(result, filename) {
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(8);
       doc.setTextColor(...C.text);
-      doc.text(check.label || '', M + 8, y);
+      doc.text(s(check.label || ''), M + 8, y);
 
       // Detail
       if (check.detail) {
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(7.5);
         doc.setTextColor(...C.muted);
-        const lines = doc.splitTextToSize(check.detail, W - M - 8 - M);
+        const lines = doc.splitTextToSize(s(check.detail), W - M - 8 - M);
         doc.text(lines, M + 8, y + 4.5);
         y += 4.5 + lines.length * 3.8 + 3;
       } else {
@@ -247,12 +266,12 @@ export function exportBatchPdf(batchResult) {
   doc.setFontSize(18);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(...sc);
-  doc.text(batchResult.globalVerdict, M + 44, y + 14);
+  doc.text(s(batchResult.globalVerdict), M + 44, y + 14);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
   doc.setTextColor(...C.muted);
-  doc.text(`${batchResult.documentsAnalyzed} document(s) analysé(s)`, M + 44, y + 22);
+  doc.text(s(`${batchResult.documentsAnalyzed} document(s) analyse(s)`), M + 44, y + 22);
   doc.text('Score = minimum des scores individuels', M + 44, y + 28);
   y += 40;
 
@@ -293,12 +312,12 @@ export function exportBatchPdf(batchResult) {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
     doc.setTextColor(...C.text);
-    doc.text(`${i + 1}. ${fname}`, M + 5, y + 10);
+    doc.text(s(`${i + 1}. ${fname}`), M + 5, y + 10);
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8);
     doc.setTextColor(...c);
-    doc.text(result.verdict, M + 5, y + 17);
+    doc.text(s(result.verdict), M + 5, y + 17);
 
     doc.setFontSize(7.5);
     doc.setTextColor(...C.muted);
@@ -321,13 +340,13 @@ export function exportBatchPdf(batchResult) {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11);
     doc.setTextColor(...C.text);
-    doc.text(fname, M, y);
+    doc.text(s(fname), M, y);
     y += 6;
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(20);
     doc.setTextColor(...sc2);
-    doc.text(`${result.score} — ${result.verdict}`, M, y);
+    doc.text(s(`${result.score} - ${result.verdict}`), M, y);
     y += 10;
 
     doc.setDrawColor(...C.border);
@@ -341,7 +360,7 @@ export function exportBatchPdf(batchResult) {
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(7.5);
       doc.setTextColor(...C.muted);
-      doc.text(cat.toUpperCase(), M, y);
+      doc.text(s(cat.toUpperCase()), M, y);
       y += 5;
 
       for (const check of result.checks.filter(c => c.category === cat)) {
@@ -355,12 +374,12 @@ export function exportBatchPdf(batchResult) {
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(8);
         doc.setTextColor(...C.text);
-        doc.text(check.label || '', M + 8, y);
+        doc.text(s(check.label || ''), M + 8, y);
         if (check.detail) {
           doc.setFont('helvetica', 'normal');
           doc.setFontSize(7.5);
           doc.setTextColor(...C.muted);
-          const lines = doc.splitTextToSize(check.detail, W - M - 8 - M);
+          const lines = doc.splitTextToSize(s(check.detail), W - M - 8 - M);
           doc.text(lines, M + 8, y + 4.5);
           y += 4.5 + lines.length * 3.8 + 3;
         } else {
