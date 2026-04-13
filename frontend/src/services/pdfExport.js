@@ -32,7 +32,8 @@ function s(str) {
     .replace(/✓/g, '+')
     .replace(/✕/g, 'x')
     .replace(/✦/g, '*')
-    .replace(/[^\x00-\xFF]/g, '?');    // fallback for remaining non-Latin-1
+    .replace(/€/g, 'EUR')
+    .replace(/[^\x00-\xFF]/g, '');     // drop remaining non-Latin-1 silently
 }
 
 function scoreColor(color) {

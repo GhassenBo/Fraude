@@ -37,6 +37,15 @@ public class PdfAnalyzer {
         "cotisation", "brut", "net", "total"
     );
 
+    // Cotisation fund / institution names — must not be matched as employee names
+    private static final List<String> NOT_EMPLOYEE_KEYWORDS = List.of(
+        "agirc", "arrco", "malakoff", "humanis", "prevoyance", "prévoyance",
+        "retraite", "complementaire", "complémentaire", "assurance", "mutuelle",
+        "securite", "sécurité", "sociale", "chomage", "chômage", "prelevement",
+        "prélèvement", "cotisation", "urssaf", "cipav", "ircantec",
+        "ag2r", "apec", "fafiec", "opco", "prev", "soin", "tranche"
+    );
+
     public record PdfAnalysisData(
         String rawText,
         AnalysisResult.DocumentInfo documentInfo,
@@ -199,31 +208,43 @@ public class PdfAnalyzer {
     private String extractEmploye(String text, String[] lines) {
         // 1. "Monsieur / Madame <FIRSTNAME LASTNAME>" — addressee block
         Matcher m = Pattern.compile("(?i)(?:Monsieur|Madame|M\\.?|Mme\\.?)\\s+([A-ZÀÂÉÈÊÎÔÙÛÇ][A-ZÀÂÉÈÊÎÔÙÛÇ\\s\\-]{2,50})").matcher(text);
-        if (m.find()) {
+        while (m.find()) {
             String name = m.group(1).trim();
-            // Exclude address lines
-            if (!name.toLowerCase().contains("rue") && !name.toLowerCase().contains("avenue")
-                    && !name.toLowerCase().contains("boulevard") && !name.toLowerCase().contains("allée")) {
+            String lower = name.toLowerCase();
+            // Exclude address lines and institution names
+            if (!lower.contains("rue") && !lower.contains("avenue")
+                    && !lower.contains("boulevard") && !lower.contains("allée")
+                    && !isInstitutionName(lower)) {
                 return name;
             }
         }
-        // 2. Extract Prénom + Nom from label lines
+        // 2. Extract Prénom + Nom from label lines, skipping institution names
         String prenom = null, nom = null;
         for (String line : lines) {
             if (prenom == null) {
                 Matcher pm = Pattern.compile("(?i)pr[eé]nom\\s*[:\\s]+([A-ZÀÂÉÈÊÎÔÙÛÇ][A-Za-zÀ-ÿ\\-]+)").matcher(line);
-                if (pm.find()) prenom = pm.group(1).trim();
+                if (pm.find()) {
+                    String candidate = pm.group(1).trim();
+                    if (!isInstitutionName(candidate.toLowerCase())) prenom = candidate;
+                }
             }
             if (nom == null) {
-                // "Nom :" but NOT "Nom de" / "Nombre" to avoid false matches
-                Matcher nm = Pattern.compile("(?i)\\bnom\\s*[:\\s]+([A-ZÀÂÉÈÊÎÔÙÛÇ][A-Za-zÀ-ÿ\\-]+)").matcher(line);
-                if (nm.find()) nom = nm.group(1).trim();
+                // "Nom :" only — require colon to avoid matching "Nombre", "Nominal", etc.
+                Matcher nm = Pattern.compile("(?i)\\bnom\\s*:\\s*([A-ZÀÂÉÈÊÎÔÙÛÇ][A-Za-zÀ-ÿ\\-]+)").matcher(line);
+                if (nm.find()) {
+                    String candidate = nm.group(1).trim();
+                    if (!isInstitutionName(candidate.toLowerCase())) nom = candidate;
+                }
             }
         }
         if (prenom != null && nom != null) return prenom + " " + nom;
         if (prenom != null) return prenom;
         if (nom != null) return nom;
         return null;
+    }
+
+    private boolean isInstitutionName(String lowerName) {
+        return NOT_EMPLOYEE_KEYWORDS.stream().anyMatch(lowerName::contains);
     }
 
     // ── Période ───────────────────────────────────────────────────────────────
