@@ -18,7 +18,12 @@ public class PdfAnalyzer {
     private static final List<String> LEGIT_PRODUCERS = List.of(
         "sage", "adp", "silae", "cegid", "hr access", "peopledoc",
         "payfit", "lucca", "workday", "sap", "oracle", "quadratus",
-        "microsoft dynamics", "paye", "isapaye"
+        "microsoft dynamics", "paye", "isapaye",
+        // Government / URSSAF platforms
+        "urssaf", "tese", "cea", "net-entreprises", "dsn",
+        // Common PDF generation libraries used by payroll software
+        "reportlab", "jasper", "itext", "fpdf", "tcpdf", "crystal reports",
+        "fo2pdf", "apache fop", "xsl-fo"
     );
 
     private static final List<String> SUSPICIOUS_PRODUCERS = List.of(
@@ -41,8 +46,11 @@ public class PdfAnalyzer {
             PDFTextStripper stripper = new PDFTextStripper();
             String rawText = stripper.getText(document);
 
+            // Normalize metadata — some PDF generators output "null" as a literal string
             String producer = Optional.ofNullable(info.getProducer()).orElse("").toLowerCase();
             String creator = Optional.ofNullable(info.getCreator()).orElse("").toLowerCase();
+            if ("null".equals(producer)) producer = "";
+            if ("null".equals(creator)) creator = "";
             String creationDate = info.getCreationDate() != null ? info.getCreationDate().getTime().toString() : "Inconnue";
             String modDate = info.getModificationDate() != null ? info.getModificationDate().getTime().toString() : null;
             boolean wasModified = modDate != null && !modDate.equals(creationDate);
@@ -124,8 +132,8 @@ public class PdfAnalyzer {
             .siret(extractSiret(text))
             .employe(extractField(text, "(?i)(nom|salarié|employé)[\\s:]*([A-Z][A-Z\\s-]{2,40})"))
             .periode(extractField(text, "(?i)(période|mois|du)[\\s:]*([A-Za-zéàû]+\\s+\\d{4})"))
-            .salaireBrut(extractMontant(text, "(?i)(salaire\\s*brut|brut\\s+total)[\\s:€]*([\\d\\s,.]+)"))
-            .salaireNet(extractMontant(text, "(?i)(net\\s+[àa]\\s+payer|net\\s+payé|net\\s+imposable)[\\s:€]*([\\d\\s,.]+)"))
+            .salaireBrut(extractMontant(text, "(?i)(?:salaire\\s*brut|r[eé]mun[eé]ration\\s*brut[e]?|total\\s*r[eé]mun[eé]ration\\s*brut[e]?|brut\\s+total|total\\s+brut)[\\s\\t:€]*([\\d][\\d\\s,.]*)"))
+            .salaireNet(extractMontant(text, "(?i)(?:net\\s+[àa]\\s+payer|net\\s+pay[eé]|net\\s+vers[eé]|net\\s+imposable|net\\s+fiscal)[\\s\\t:€]*([\\d][\\d\\s,.]*)"))
             .pdfCreatedWith(producer.isBlank() ? "Inconnu" : producer)
             .pdfCreationDate(creationDate)
             .pdfModifiedDate(modDate)

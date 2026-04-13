@@ -77,13 +77,15 @@ public class SiretVerificationService {
     }
 
     /**
-     * Validates SIRET using Luhn algorithm
+     * Validates SIRET using Luhn algorithm.
+     * For a 14-digit SIRET, we double every second digit starting from the right
+     * (positions 2, 4, 6, ... from right = indices 12, 10, 8, ... = even indices from left).
      */
     private boolean isValidSiretChecksum(String siret) {
         int sum = 0;
         for (int i = 0; i < 14; i++) {
             int digit = Character.getNumericValue(siret.charAt(i));
-            if (i % 2 == 1) {
+            if (i % 2 == 0) { // even index from left = even position from right for 14-digit number
                 digit *= 2;
                 if (digit > 9) digit -= 9;
             }

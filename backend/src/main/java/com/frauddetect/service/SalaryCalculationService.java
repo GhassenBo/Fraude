@@ -20,9 +20,14 @@ public class SalaryCalculationService {
     public List<AnalysisResult.Check> analyzeCalculations(String text) {
         List<AnalysisResult.Check> checks = new ArrayList<>();
 
-        Double salaireBrut = extractFirstMontant(text, "(?i)salaire\\s*brut[\\s:€]*([\\d\\s,.]+)");
-        Double salaireNet = extractFirstMontant(text, "(?i)net\\s+[àa]\\s+payer[\\s:€]*([\\d\\s,.]+)");
-        Double totalCotisations = extractFirstMontant(text, "(?i)(total\\s+cotisations|total\\s+retenues)[\\s:€]*([\\d\\s,.]+)");
+        // Multiple patterns to handle different payroll software formats (Sage, URSSAF TESE, ADP, etc.)
+        Double salaireBrut = extractFirstMontant(text,
+            "(?i)(?:salaire\\s*brut|r[eé]mun[eé]ration\\s*brut[e]?|total\\s*r[eé]mun[eé]ration\\s*brut[e]?|brut\\s+total|total\\s+brut)[\\s\\t:€]*([\\d][\\d\\s,.]*)");
+        Double salaireNet = extractFirstMontant(text,
+            "(?i)(?:net\\s+[àa]\\s+payer|net\\s+pay[eé]|net\\s+vers[eé]|net\\s+imposable|net\\s+fiscal)[\\s\\t:€]*([\\d][\\d\\s,.]*)");
+        Double totalCotisations = extractFirstMontant(text,
+            "(?i)(?:total\\s+cotisations|total\\s+retenues|total\\s+pr[eé]l[eè]vements)[\\s\\t:€]*([\\d][\\d\\s,.]*)");
+
 
         // Check 1: Brut vs Net ratio
         if (salaireBrut != null && salaireNet != null && salaireBrut > 0) {
