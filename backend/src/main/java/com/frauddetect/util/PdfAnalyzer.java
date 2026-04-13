@@ -47,10 +47,10 @@ public class PdfAnalyzer {
             String rawText = stripper.getText(document);
 
             // Normalize metadata — some PDF generators output "null" as a literal string
-            String producer = Optional.ofNullable(info.getProducer()).orElse("").toLowerCase();
-            String creator = Optional.ofNullable(info.getCreator()).orElse("").toLowerCase();
-            if ("null".equals(producer)) producer = "";
-            if ("null".equals(creator)) creator = "";
+            String rawProducer = Optional.ofNullable(info.getProducer()).orElse("").toLowerCase();
+            String rawCreator = Optional.ofNullable(info.getCreator()).orElse("").toLowerCase();
+            final String producer = "null".equals(rawProducer) ? "" : rawProducer;
+            final String creator = "null".equals(rawCreator) ? "" : rawCreator;
             String creationDate = info.getCreationDate() != null ? info.getCreationDate().getTime().toString() : "Inconnue";
             String modDate = info.getModificationDate() != null ? info.getModificationDate().getTime().toString() : null;
             boolean wasModified = modDate != null && !modDate.equals(creationDate);
