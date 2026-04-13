@@ -80,12 +80,22 @@ public class PdfAnalyzer {
                     .status("OK")
                     .detail("Logiciel de paie reconnu : " + (producer.isBlank() ? creator : producer))
                     .build());
+            } else if (producer.isBlank() && creator.isBlank()) {
+                // No metadata at all — normal for government portals (URSSAF TESE) and
+                // many enterprise payroll systems that don't embed software metadata
+                checks.add(AnalysisResult.Check.builder()
+                    .category("Métadonnées")
+                    .label("Logiciel de création")
+                    .status("OK")
+                    .detail("Métadonnées logiciel absentes — courant pour les portails officiels et logiciels de paie professionnels")
+                    .build());
             } else {
+                // A value IS present but not in our whitelist — worth noting
                 checks.add(AnalysisResult.Check.builder()
                     .category("Métadonnées")
                     .label("Logiciel de création")
                     .status("WARNING")
-                    .detail("Logiciel non reconnu : " + (producer.isBlank() && creator.isBlank() ? "Inconnu" : (producer + " " + creator).trim()))
+                    .detail("Logiciel non reconnu : " + (producer.isBlank() ? creator : producer).trim())
                     .build());
             }
 
