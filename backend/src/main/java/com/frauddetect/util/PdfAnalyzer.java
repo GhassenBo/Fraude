@@ -350,17 +350,42 @@ public class PdfAnalyzer {
 
     // ── Période ───────────────────────────────────────────────────────────────
 
+    private static final String[] MOIS_FR = {
+        "", "Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
+        "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"
+    };
+
     private String extractPeriode(String text, String[] lines) {
-        // Match "novembre 2025" or "Novembre 2025"
+        // 1. Explicit month name: "novembre 2025" / "Novembre 2025"
         Matcher m = Pattern.compile("(?i)(janvier|f[eé]vrier|mars|avril|mai|juin|juillet|ao[uû]t|septembre|octobre|novembre|d[eé]cembre)\\s+(20\\d{2})").matcher(text);
         if (m.find()) return capitalize(m.group(1)) + " " + m.group(2);
-        // Match "du 01/11/2025 au 30/11/2025" or "du 01/11/25 au 30/11/25"
-        m = Pattern.compile("(?i)p[eé]riode[^\\n]{0,30}du\\s+(\\d{1,2}[/.]\\d{1,2}[/.]\\d{2,4})").matcher(text);
-        if (m.find()) return "du " + m.group(1);
-        // Match "Salaire versé le 30/11/2025"
-        m = Pattern.compile("(?i)salaire\\s+vers[eé]\\s+le\\s+(\\d{1,2}[/.]\\d{1,2}[/.]\\d{2,4})").matcher(text);
-        if (m.find()) return m.group(1);
+
+        // 2. Range "du DD-MM-YYYY au DD-MM-YYYY" or "du DD/MM/YYYY au DD/MM/YYYY"
+        //    Handles: "du 01-07-2021 au 31-07-2021" (common in iText payslips)
+        m = Pattern.compile("(?i)du\\s+\\d{1,2}[-/.]\\d{1,2}[-/.](\\d{4})\\s+au\\s+\\d{1,2}[-/.](\\d{2})[-/.](\\d{4})").matcher(text);
+        if (m.find()) return monthNumberToName(m.group(2)) + " " + m.group(3);
+
+        // 3. "Période : du 01/11/2025" label
+        m = Pattern.compile("(?i)p[eé]riode[^\\n]{0,30}du\\s+(\\d{1,2})[-/.]+(\\d{2})[-/.]+(\\d{4})").matcher(text);
+        if (m.find()) return monthNumberToName(m.group(2)) + " " + m.group(3);
+
+        // 4. "Salaire versé le 30/07/2021" or "Date de paiement 31-07-2021"
+        m = Pattern.compile("(?i)(?:salaire\\s+vers[eé]|paiement|date\\s+de\\s+virement)\\s+le\\s+(\\d{1,2})[-/.]+(\\d{2})[-/.]+(\\d{4})").matcher(text);
+        if (m.find()) return monthNumberToName(m.group(2)) + " " + m.group(3);
+
+        // 5. Last resort: any "au 31-MM-YYYY" end-of-period marker
+        m = Pattern.compile("au\\s+(?:28|29|30|31)[-/.]?(\\d{2})[-/.](\\d{4})").matcher(text);
+        if (m.find()) return monthNumberToName(m.group(1)) + " " + m.group(2);
+
         return null;
+    }
+
+    private String monthNumberToName(String monthNum) {
+        try {
+            int n = Integer.parseInt(monthNum);
+            if (n >= 1 && n <= 12) return MOIS_FR[n];
+        } catch (NumberFormatException ignored) {}
+        return monthNum;
     }
 
     private String capitalize(String s) {

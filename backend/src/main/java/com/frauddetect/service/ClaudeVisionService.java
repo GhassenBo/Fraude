@@ -70,8 +70,8 @@ public class ClaudeVisionService {
     private String renderFirstPageToBase64(byte[] pdfBytes) {
         try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
             PDFRenderer renderer = new PDFRenderer(doc);
-            // 150 DPI gives a good balance between clarity and payload size
-            BufferedImage image = renderer.renderImageWithDPI(0, 150);
+            // 200 DPI for sufficient clarity on dense tabular payslip layouts
+            BufferedImage image = renderer.renderImageWithDPI(0, 200);
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             ImageIO.write(image, "png", baos);
             return Base64.getEncoder().encodeToString(baos.toByteArray());
@@ -130,17 +130,30 @@ public class ClaudeVisionService {
         return """
                 Tu es un expert en bulletins de salaire français.
                 Analyse cette image d'un bulletin de salaire et extrait les informations suivantes.
-                Réponds UNIQUEMENT avec un objet JSON valide, sans texte avant ou après :
+                Réponds UNIQUEMENT avec un objet JSON valide, sans texte avant ou après.
+
+                RÈGLES IMPORTANTES pour les montants :
+                - SALAIRE BRUT : c'est le TOTAL de la rémunération brute AVANT toutes les cotisations, \
+                souvent libellé "Salaire Brut", "Brut Fiscal", "Total Brut" ou "Rémunération Brute". \
+                Ce montant est typiquement entre 1 000 € et 15 000 €. \
+                IGNORE les colonnes "Taux", "Base", "Unité", "Parts patronales", "Parts salariales" — \
+                ce sont des taux et bases de calcul, pas des montants de salaire total.
+                - NET À PAYER : c'est le montant FINAL versé à l'employé, souvent dans un encadré \
+                séparé en bas du bulletin. Cherche "NET A PAYER", "Net à payer", "Net versé". \
+                C'est le PLUS GRAND montant visible dans cet encadré NET A PAYER. \
+                IGNORE "Net fiscal" et "Net imposable" — ce sont des montants fiscaux annuels.
+                - PÉRIODE : si les dates sont numériques (ex: 01-07-2021 au 31-07-2021), \
+                convertis en "Juillet 2021".
+
+                Format JSON attendu :
                 {
-                  "employeur": "nom de l'entreprise employeur (ex: ACME SAS), ou null si absent",
-                  "siret": "numéro SIRET exactement 14 chiffres sans espaces, ou null si absent",
-                  "employe": "prénom et nom complet de l'employé, ou null si absent",
-                  "periode": "mois et année de paie (ex: Novembre 2025), ou null si absent",
-                  "salaireBrut": valeur numérique décimale du salaire brut en euros (ex: 3224.64), ou null,
-                  "salaireNet": valeur numérique décimale du net à payer en euros (ex: 2512.23), ou null
+                  "employeur": "nom de l'entreprise employeur, ou null",
+                  "siret": "14 chiffres sans espaces, ou null",
+                  "employe": "prénom et nom complet de l'employé, ou null",
+                  "periode": "mois et année (ex: Juillet 2021), ou null",
+                  "salaireBrut": valeur numérique décimale du brut total (ex: 4249.60), ou null,
+                  "salaireNet": valeur numérique décimale du net à payer (ex: 2865.70), ou null
                 }
-                Pour salaireBrut cherche le libellé "Salaire brut" ou "Rémunération brute" ou "Total brut".
-                Pour salaireNet cherche le libellé "Net à payer" ou "Net versé" ou "Net avant impôt".
                 """;
     }
 
