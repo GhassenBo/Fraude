@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import jakarta.annotation.PostConstruct;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.rendering.PDFRenderer;
@@ -33,6 +34,15 @@ public class ClaudeVisionService {
 
     private final RestTemplate restTemplate = new RestTemplate();
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @PostConstruct
+    public void init() {
+        if (isEnabled()) {
+            System.out.println("[ClaudeVision] ✓ API key detected — Vision extraction ACTIVE (model: " + MODEL + ")");
+        } else {
+            System.out.println("[ClaudeVision] ✗ No ANTHROPIC_API_KEY found — Vision extraction DISABLED, falling back to regex");
+        }
+    }
 
     public boolean isEnabled() {
         return apiKey != null && !apiKey.isBlank();
