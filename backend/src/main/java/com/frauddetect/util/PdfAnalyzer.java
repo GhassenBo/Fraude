@@ -1,6 +1,7 @@
 package com.frauddetect.util;
 
 import com.frauddetect.model.AnalysisResult;
+import com.frauddetect.service.ClaudeVisionService;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDDocumentInformation;
@@ -14,6 +15,12 @@ import java.util.regex.*;
 
 @Component
 public class PdfAnalyzer {
+
+    private final ClaudeVisionService claudeVisionService;
+
+    public PdfAnalyzer(ClaudeVisionService claudeVisionService) {
+        this.claudeVisionService = claudeVisionService;
+    }
 
     // Known payroll software producers
     private static final List<String> LEGIT_PRODUCERS = List.of(
@@ -150,7 +157,30 @@ public class PdfAnalyzer {
                     .build());
             }
 
-            AnalysisResult.DocumentInfo docInfo = extractDocumentInfo(rawText, producer, creationDate, modDate, wasModified, pageCount);
+            // Try Claude Vision first — more accurate on complex multi-column layouts.
+            // Fall back field-by-field to regex extraction for anything Vision left null.
+            AnalysisResult.DocumentInfo regexInfo = extractDocumentInfo(rawText, producer, creationDate, modDate, wasModified, pageCount);
+            ClaudeVisionService.VisionExtraction vision = claudeVisionService.extractFields(bytes);
+
+            AnalysisResult.DocumentInfo docInfo;
+            if (vision != null) {
+                docInfo = AnalysisResult.DocumentInfo.builder()
+                    .employeur(coalesce(vision.employeur(), regexInfo.getEmployeur()))
+                    .siret(coalesce(vision.siret(), regexInfo.getSiret()))
+                    .employe(coalesce(vision.employe(), regexInfo.getEmploye()))
+                    .periode(coalesce(vision.periode(), regexInfo.getPeriode()))
+                    .salaireBrut(coalesce(vision.salaireBrut(), regexInfo.getSalaireBrut()))
+                    .salaireNet(coalesce(vision.salaireNet(), regexInfo.getSalaireNet()))
+                    .pdfCreatedWith(regexInfo.getPdfCreatedWith())
+                    .pdfCreationDate(regexInfo.getPdfCreationDate())
+                    .pdfModifiedDate(regexInfo.getPdfModifiedDate())
+                    .pdfModified(regexInfo.isPdfModified())
+                    .pageCount(regexInfo.getPageCount())
+                    .build();
+            } else {
+                docInfo = regexInfo;
+            }
+
             return new PdfAnalysisData(rawText, docInfo, checks);
         }
     }
@@ -187,6 +217,10 @@ public class PdfAnalyzer {
             .pdfModified(wasModified)
             .pageCount(pageCount)
             .build();
+    }
+
+    private static <T> T coalesce(T first, T second) {
+        return first != null ? first : second;
     }
 
     // ── Employeur ─────────────────────────────────────────────────────────────
