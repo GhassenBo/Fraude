@@ -18,20 +18,27 @@ public class SalaryCalculationService {
     private static final double CHARGES_SALARIALES_MIN = 0.20;
     private static final double CHARGES_SALARIALES_MAX = 0.30;
 
-    public List<AnalysisResult.Check> analyzeCalculations(String text) {
+    public List<AnalysisResult.Check> analyzeCalculations(String text, AnalysisResult.DocumentInfo docInfo) {
         List<AnalysisResult.Check> checks = new ArrayList<>();
         String[] lines = text.split("\\r?\\n");
 
-        // Line-by-line extraction — returns LARGEST amount within scan window of the label.
-        // "net fiscal" and "net imposable" intentionally excluded: they refer to YTD/tax-declaration
-        // values, not the actual monthly net à payer, and cause false extractions from cumuls sections.
-        Double salaireBrut = extractAmountNearLabel(lines,
-            "salaire brut", "remuneration brute", "remuneration brut",
-            "total remuneration brute", "total remuneration brut",
-            "brut total", "total brut", "brut fiscal", "brut :");
-        Double salaireNet = extractAmountNearLabel(lines,
-            "net a payer", "net paye", "net verse",
-            "net avant impot");
+        // Prefer Claude Vision values from docInfo (already validated, no column confusion).
+        // Fall back to regex extraction only when Vision values are absent.
+        Double salaireBrut = parseDocInfoAmount(docInfo != null ? docInfo.getSalaireBrut() : null);
+        Double salaireNet  = parseDocInfoAmount(docInfo != null ? docInfo.getSalaireNet()  : null);
+
+        if (salaireBrut == null) {
+            salaireBrut = extractAmountNearLabel(lines,
+                "salaire brut", "remuneration brute", "remuneration brut",
+                "total remuneration brute", "total remuneration brut",
+                "brut total", "total brut", "brut fiscal", "brut :");
+        }
+        if (salaireNet == null) {
+            salaireNet = extractAmountNearLabel(lines,
+                "net a payer", "net paye", "net verse",
+                "net avant impot");
+        }
+
         Double totalCotisations = extractAmountNearLabel(lines,
             "total cotisations salariales", "total retenues salariales",
             "total prelevements salariales", "total charges salariales");
@@ -135,6 +142,18 @@ public class SalaryCalculationService {
         checks.addAll(checkRequiredFields(text));
 
         return checks;
+    }
+
+    /** Parses a DocumentInfo amount string like "4249.60 €" or "4 249,60 €" to a Double. */
+    private Double parseDocInfoAmount(String amount) {
+        if (amount == null || amount.isBlank()) return null;
+        try {
+            double d = Double.parseDouble(
+                amount.replaceAll("[\\s\u00a0€]", "").replace(",", "."));
+            return d > 0 ? d : null;
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     /** Strip diacritical marks so "NET A PAYER" matches the accented key "net à payer". */
