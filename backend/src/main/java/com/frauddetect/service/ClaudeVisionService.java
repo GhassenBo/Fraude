@@ -143,34 +143,43 @@ public class ClaudeVisionService {
     private String buildForensicPrompt() {
         return """
                 Tu es un expert légiste spécialisé dans la détection de falsification de bulletins de salaire.
-                Examine cette image TRÈS attentivement à la recherche de signes de falsification.
+                Ton rôle est de détecter des signes CLAIRS et INDÉNIABLES de falsification.
 
-                Analyse ces 5 points :
+                RÈGLE FONDAMENTALE — Sois CONSERVATEUR :
+                - Les différences de netteté dues à la compression JPEG/PNG sont NORMALES → ne pas signaler
+                - Les légères variations de fond dues au scan ou à l'impression sont NORMALES → ne pas signaler
+                - Les formats de polices légèrement différents entre libellés et chiffres sont NORMAUX → ne pas signaler
+                - Une analyse mathématique "inhabituelle mais cohérente" n'est PAS une falsification → ne pas signaler
+                - En cas de doute, choisis OK. Un faux positif est pire qu'un faux négatif.
 
-                1. RENDU DES CHIFFRES : Les montants numériques (salaires, cotisations, totaux) \
-                ont-ils exactement la même police, épaisseur et taille que les libellés autour d'eux ? \
-                Des chiffres légèrement différents des autres (plus nets, plus flous, espacement différent) ?
+                Cherche UNIQUEMENT ces signes GRAVES et ÉVIDENTS :
 
-                2. ARTEFACTS VISUELS : Y a-t-il des zones blanches anormales, \
-                des bords nets ou un "halo" autour de certains chiffres, \
-                un flou localisé, ou des pixels parasites qui indiqueraient une retouche ?
+                1. REMPLACEMENT VISIBLE D'UN CHIFFRE : Un chiffre visuellement isolé — \
+                entouré d'un halo blanc net, pixels de fond clairement différents autour d'une \
+                seule valeur, ou flou localisé sur un nombre précis alors que tout le reste est net. \
+                → WARNING uniquement si la différence est NETTE et localisée sur 1-2 valeurs.
 
-                3. ALIGNEMENT DES COLONNES : Les chiffres sont-ils parfaitement alignés \
-                dans leur colonne ? Un nombre décalé par rapport aux autres de sa colonne est suspect.
+                2. RECTANGLE BLANC DE MASQUAGE : Une zone rectangulaire manifestement plus blanche \
+                que le fond, avec des bords nets visibles, recouvrant du texte. \
+                → FAILED si clairement visible.
 
-                4. COHÉRENCE DES TOTAUX : Les montants visibles sont-ils mathématiquement cohérents \
-                (ex: brut - cotisations ≈ net) ? Un total impossible est un signe fort de falsification.
+                3. INCOHÉRENCE MATHÉMATIQUE FLAGRANTE : Brut - total cotisations ≠ net à payer \
+                avec un écart supérieur à 50€ (pas des arrondis normaux, pas une prime séparée). \
+                → FAILED uniquement si l'erreur est > 50€ et inexplicable.
 
-                5. FOND DU DOCUMENT : Y a-t-il des rectangles ou zones légèrement plus blancs \
-                que le fond général, qui pourraient cacher le texte original ?
+                4. ALIGNEMENT MANIFESTEMENT CASSÉ : Un chiffre décalé de plusieurs millimètres \
+                par rapport à toute sa colonne — visible à l'œil nu, pas un léger décalage PDF normal. \
+                → WARNING uniquement si évident.
 
-                Réponds UNIQUEMENT avec ce JSON (5 findings max) :
+                Réponds UNIQUEMENT avec ce JSON :
                 {
                   "findings": [
                     {"status": "OK" | "WARNING" | "FAILED", "label": "nom court", "detail": "explication précise"}
                   ]
                 }
-                Si tout est visuellement normal, un seul finding "OK" suffit.
+                Si aucun signe clair de falsification : un seul finding \
+                {"status": "OK", "label": "Analyse visuelle", "detail": "Aucun signe visuel clair de falsification détecté"}.
+                Maximum 3 findings. Ne signale que ce qui est CERTAIN et ÉVIDENT.
                 """;
     }
 
