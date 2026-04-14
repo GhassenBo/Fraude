@@ -8,6 +8,7 @@ import org.apache.pdfbox.text.PDFTextStripper;
 import org.springframework.stereotype.Component;
 
 import java.io.InputStream;
+import java.text.Normalizer;
 import java.util.*;
 import java.util.regex.*;
 
@@ -159,14 +160,14 @@ public class PdfAnalyzer {
                                                               boolean wasModified, int pageCount) {
         String[] lines = text.split("\\r?\\n");
 
+        // "net fiscal" and "net imposable" excluded: they are YTD/tax-declaration values,
+        // not the actual monthly net à payer (would extract wrong cumul values).
         String brutStr = extractAmountNearLabel(lines,
-            "salaire brut", "rémunération brute", "rémunération brut",
-            "total rémunération brute", "total rémunération brut",
+            "salaire brut", "remuneration brute", "remuneration brut",
+            "total remuneration brute", "total remuneration brut",
             "brut total", "total brut", "brut fiscal", "brut :");
         String netStr = extractAmountNearLabel(lines,
-            "net à payer", "net a payer", "net payé", "net paye",
-            "net versé", "net verse", "net imposable", "net fiscal",
-            "net avant impôt", "net avant impot");
+            "net a payer", "net paye", "net verse", "net avant impot");
 
         // Sanity check: net cannot exceed brut on a payslip — discard if impossible
         if (brutStr != null && netStr != null && parseAmount(netStr) > parseAmount(brutStr)) {
@@ -336,25 +337,24 @@ public class PdfAnalyzer {
     // ── Amount near label ─────────────────────────────────────────────────────
 
     /**
-     * Finds the best monetary amount near a label.
-     * Scans same line + up to 3 following lines, returns the LARGEST amount found.
-     * "Largest" heuristic avoids small incidental numbers (hours, percentages)
-     * and favours the actual salary total.
+     * Finds the best monetary amount near a label (diacritic-insensitive match).
+     * Scans 1 line before + same line + up to 4 following lines, returns the LARGEST amount.
+     * Scanning before handles PDFs where the value is extracted before the label text
+     * due to right-column-first ordering. "Largest" avoids small incidental numbers.
      */
     private String extractAmountNearLabel(String[] lines, String... labels) {
         String bestRaw = null;
         double bestVal = -1;
 
         for (int i = 0; i < lines.length; i++) {
-            String lower = lines[i].toLowerCase();
+            String norm = normalizeDiacritics(lines[i]);
             boolean labelFound = false;
             for (String label : labels) {
-                if (lower.contains(label.toLowerCase())) { labelFound = true; break; }
+                if (norm.contains(label)) { labelFound = true; break; }
             }
             if (!labelFound) continue;
 
-            // Collect amounts from same line and next 3 lines
-            for (int j = i; j <= Math.min(i + 3, lines.length - 1); j++) {
+            for (int j = Math.max(0, i - 1); j <= Math.min(i + 4, lines.length - 1); j++) {
                 String candidate = findLargestMonetaryAmount(lines[j]);
                 if (candidate != null) {
                     double val = parseAmount(candidate);
@@ -363,6 +363,11 @@ public class PdfAnalyzer {
             }
         }
         return bestRaw != null ? bestRaw + " €" : null;
+    }
+
+    private String normalizeDiacritics(String text) {
+        return Normalizer.normalize(text.toLowerCase(), Normalizer.Form.NFD)
+            .replaceAll("[\\p{InCombiningDiacriticalMarks}]", "");
     }
 
     /** Returns the LARGEST monetary amount (100–200000) found in the line. */

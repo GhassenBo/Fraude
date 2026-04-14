@@ -5,6 +5,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.*;
 import java.util.regex.*;
+import java.text.Normalizer;
 
 @Service
 public class SalaryCalculationService {
@@ -21,19 +22,25 @@ public class SalaryCalculationService {
         List<AnalysisResult.Check> checks = new ArrayList<>();
         String[] lines = text.split("\\r?\\n");
 
-        // Line-by-line extraction — returns LARGEST amount within 3 lines of the label
+        // Line-by-line extraction — returns LARGEST amount within scan window of the label.
+        // "net fiscal" and "net imposable" intentionally excluded: they refer to YTD/tax-declaration
+        // values, not the actual monthly net à payer, and cause false extractions from cumuls sections.
         Double salaireBrut = extractAmountNearLabel(lines,
-            "salaire brut", "rémunération brute", "rémunération brut",
-            "total rémunération brute", "total rémunération brut",
+            "salaire brut", "remuneration brute", "remuneration brut",
+            "total remuneration brute", "total remuneration brut",
             "brut total", "total brut", "brut fiscal", "brut :");
         Double salaireNet = extractAmountNearLabel(lines,
-            "net à payer", "net a payer", "net payé", "net paye",
-            "net versé", "net verse", "net imposable", "net fiscal",
-            "net avant impôt", "net avant impot");
+            "net a payer", "net paye", "net verse",
+            "net avant impot");
         Double totalCotisations = extractAmountNearLabel(lines,
-            "total cotisations", "total retenues", "total prélèvements",
-            "total prelevements", "total charges salariales",
-            "total des cotisations");
+            "total cotisations salariales", "total retenues salariales",
+            "total prelevements salariales", "total charges salariales");
+
+        // If net > brut both values are likely extraction failures — discard to avoid false positives
+        if (salaireBrut != null && salaireNet != null && salaireNet > salaireBrut) {
+            salaireBrut = null;
+            salaireNet = null;
+        }
 
 
         // Check 1: Brut vs Net ratio
@@ -130,22 +137,29 @@ public class SalaryCalculationService {
         return checks;
     }
 
+    /** Strip diacritical marks so "NET A PAYER" matches the accented key "net à payer". */
+    private String normalizeDiacritics(String text) {
+        return Normalizer.normalize(text.toLowerCase(), Normalizer.Form.NFD)
+            .replaceAll("[\\p{InCombiningDiacriticalMarks}]", "");
+    }
+
     private List<AnalysisResult.Check> checkRequiredFields(String text) {
         List<AnalysisResult.Check> checks = new ArrayList<>();
-        String lower = text.toLowerCase();
+        // Normalize once — handles PDFs that strip accents (e.g. "NET A PAYER" vs "net à payer")
+        String normalized = normalizeDiacritics(text);
 
-        // Required fields on a French pay slip
+        // Required fields on a French pay slip — keys are already diacritic-free
         Map<String, String> requiredFields = new LinkedHashMap<>();
         requiredFields.put("siret", "Numéro SIRET employeur");
         requiredFields.put("convention collective", "Convention collective");
-        requiredFields.put("congés payés", "Congés payés");
-        requiredFields.put("net à payer", "Net à payer");
+        requiredFields.put("conges payes", "Congés payés");
+        requiredFields.put("net a payer", "Net à payer");
         requiredFields.put("cotisation", "Lignes de cotisations");
 
         int missing = 0;
         List<String> missingList = new ArrayList<>();
         for (Map.Entry<String, String> entry : requiredFields.entrySet()) {
-            if (!lower.contains(entry.getKey())) {
+            if (!normalized.contains(entry.getKey())) {
                 missing++;
                 missingList.add(entry.getValue());
             }
@@ -178,22 +192,23 @@ public class SalaryCalculationService {
     }
 
     /**
-     * Searches for a label, then returns the LARGEST monetary amount found
-     * within the same line + up to 3 following lines.
-     * "Largest" heuristic avoids picking up small incidental numbers (hours, %)
-     * and correctly identifies the salary total in multi-row labels like
-     * "NET A PAYER AVANT IMPOT SUR\nLE REVENU\n1563,67".
+     * Searches for a label (diacritic-insensitive), then returns the LARGEST monetary amount
+     * found within 1 line before + same line + up to 4 following lines.
+     * Scanning 1 line before handles PDFs where the value is extracted before the label
+     * due to right-column-first text ordering.
+     * "Largest" avoids small incidental numbers (hours, %) and correctly identifies
+     * multi-row labels like "NET A PAYER AVANT IMPOT SUR\nLE REVENU\n1563,67".
      */
     private Double extractAmountNearLabel(String[] lines, String... labels) {
         Double best = null;
         for (int i = 0; i < lines.length; i++) {
-            String lower = lines[i].toLowerCase();
+            String norm = normalizeDiacritics(lines[i]);
             boolean found = false;
             for (String label : labels) {
-                if (lower.contains(label.toLowerCase())) { found = true; break; }
+                if (norm.contains(label)) { found = true; break; }
             }
             if (!found) continue;
-            for (int j = i; j <= Math.min(i + 3, lines.length - 1); j++) {
+            for (int j = Math.max(0, i - 1); j <= Math.min(i + 4, lines.length - 1); j++) {
                 Double val = largestAmountInLine(lines[j]);
                 if (val != null && (best == null || val > best)) best = val;
             }
