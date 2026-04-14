@@ -22,18 +22,21 @@ import java.util.Base64;
 import java.util.List;
 
 /**
- * Uses the Anthropic Claude Vision API to extract payslip fields from a PDF rendered as an image.
- * Activated when the ANTHROPIC_API_KEY environment variable (or anthropic.api.key property) is set.
- * Falls back gracefully (returns null) when disabled or on any error.
+ * Uses GPT-4o Vision (OpenAI) to extract payslip fields from a PDF rendered as an image,
+ * and to detect visual signs of forgery.
+ * Reuses the same openai.api.key and openai.model as AiAnalysisService.
+ * Falls back gracefully (returns null / empty list) when disabled or on any error.
  */
 @Service
 public class ClaudeVisionService {
 
-    private static final String ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
-    private static final String MODEL = "claude-opus-4-6";
+    private static final String OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 
-    @Value("${anthropic.api.key:}")
+    @Value("${openai.api.key:}")
     private String apiKey;
+
+    @Value("${openai.model:gpt-4o}")
+    private String model;
 
     private final RestTemplate restTemplate = new RestTemplate();
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -41,17 +44,17 @@ public class ClaudeVisionService {
     @PostConstruct
     public void init() {
         if (isEnabled()) {
-            System.out.println("[ClaudeVision] ✓ API key detected — Vision extraction ACTIVE (model: " + MODEL + ")");
+            System.out.println("[VisionService] ✓ OpenAI API key detected — Vision extraction ACTIVE (model: " + model + ")");
         } else {
-            System.out.println("[ClaudeVision] ✗ No ANTHROPIC_API_KEY found — Vision extraction DISABLED, falling back to regex");
+            System.out.println("[VisionService] ✗ No OpenAI API key found — Vision extraction DISABLED, falling back to regex");
         }
     }
 
     public boolean isEnabled() {
-        return apiKey != null && !apiKey.isBlank();
+        return apiKey != null && !apiKey.isBlank() && !apiKey.startsWith("YOUR_");
     }
 
-    /** Structured result from Claude Vision extraction. */
+    /** Structured result from GPT Vision extraction. */
     public record VisionExtraction(
         String employeur,
         String siret,
@@ -62,18 +65,18 @@ public class ClaudeVisionService {
     ) {}
 
     /**
-     * Renders the first page of the PDF to a PNG image and asks Claude to extract
+     * Renders the first page of the PDF to a PNG image and asks GPT-4o Vision to extract
      * payslip fields. Returns null if disabled, rendering fails, or API call fails.
      */
     public VisionExtraction extractFields(byte[] pdfBytes) {
         if (!isEnabled()) return null;
         try {
-            String base64Image = renderFirstPageToBase64(pdfBytes);
+            String base64Image = renderPageToBase64(pdfBytes, 0, 200);
             if (base64Image == null) return null;
-            String jsonResponse = callClaudeApi(base64Image);
+            String jsonResponse = callVisionApi(base64Image, buildExtractionPrompt(), 512, true);
             return parseExtraction(jsonResponse);
         } catch (Exception e) {
-            System.err.println("[ClaudeVision] Extraction failed: " + e.getMessage());
+            System.err.println("[VisionService] Extraction failed: " + e.getMessage());
             return null;
         }
     }
@@ -81,52 +84,59 @@ public class ClaudeVisionService {
     // ── Forgery detection ─────────────────────────────────────────────────────
 
     /**
-     * Sends a high-res render of the PDF to Claude with a forensic prompt.
-     * Asks Claude to look for visual signs of tampering: font inconsistencies,
-     * pixel artefacts, misaligned columns, white-out zones, etc.
+     * Sends a high-res render of the PDF to GPT-4o Vision with a forensic prompt.
      * Returns an empty list if Vision is disabled or the call fails.
      */
     public List<AnalysisResult.Check> detectForgery(byte[] pdfBytes) {
         if (!isEnabled()) return List.of();
         try {
-            // Render at 250 DPI for maximum sharpness on forensic analysis
             String base64Image = renderPageToBase64(pdfBytes, 0, 250);
             if (base64Image == null) return List.of();
-            String jsonResponse = callClaudeForensicApi(base64Image);
+            String jsonResponse = callVisionApi(base64Image, buildForensicPrompt(), 1024, false);
             return parseForensicResponse(jsonResponse);
         } catch (Exception e) {
-            System.err.println("[ClaudeVision] Forgery detection failed: " + e.getMessage());
+            System.err.println("[VisionService] Forgery detection failed: " + e.getMessage());
             return List.of();
         }
     }
 
-    private String callClaudeForensicApi(String base64Image) throws Exception {
+    // ── API call ──────────────────────────────────────────────────────────────
+
+    private String callVisionApi(String base64Image, String prompt, int maxTokens, boolean jsonMode) throws Exception {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.set("x-api-key", apiKey);
-        headers.set("anthropic-version", "2023-06-01");
+        headers.setBearerAuth(apiKey);
 
         ObjectNode body = objectMapper.createObjectNode();
-        body.put("model", MODEL);
-        body.put("max_tokens", 1024);
+        body.put("model", model);
+        body.put("max_tokens", maxTokens);
+        body.put("temperature", 0);
+
+        if (jsonMode) {
+            ObjectNode responseFormat = objectMapper.createObjectNode();
+            responseFormat.put("type", "json_object");
+            body.set("response_format", responseFormat);
+        }
 
         ArrayNode messages = objectMapper.createArrayNode();
         ObjectNode userMsg = objectMapper.createObjectNode();
         userMsg.put("role", "user");
+
         ArrayNode content = objectMapper.createArrayNode();
 
+        // Image block (GPT Vision format)
         ObjectNode imageBlock = objectMapper.createObjectNode();
-        imageBlock.put("type", "image");
-        ObjectNode source = objectMapper.createObjectNode();
-        source.put("type", "base64");
-        source.put("media_type", "image/png");
-        source.put("data", base64Image);
-        imageBlock.set("source", source);
+        imageBlock.put("type", "image_url");
+        ObjectNode imageUrl = objectMapper.createObjectNode();
+        imageUrl.put("url", "data:image/png;base64," + base64Image);
+        imageUrl.put("detail", "high");
+        imageBlock.set("image_url", imageUrl);
         content.add(imageBlock);
 
+        // Text prompt block
         ObjectNode textBlock = objectMapper.createObjectNode();
         textBlock.put("type", "text");
-        textBlock.put("text", buildForensicPrompt());
+        textBlock.put("text", prompt);
         content.add(textBlock);
 
         userMsg.set("content", content);
@@ -134,10 +144,43 @@ public class ClaudeVisionService {
         body.set("messages", messages);
 
         HttpEntity<String> entity = new HttpEntity<>(objectMapper.writeValueAsString(body), headers);
-        ResponseEntity<String> response = restTemplate.exchange(
-            ANTHROPIC_API_URL, HttpMethod.POST, entity, String.class);
+        ResponseEntity<String> response = restTemplate.exchange(OPENAI_URL, HttpMethod.POST, entity, String.class);
+
         JsonNode root = objectMapper.readTree(response.getBody());
-        return root.path("content").get(0).path("text").asText();
+        return root.path("choices").get(0).path("message").path("content").asText();
+    }
+
+    // ── Prompts ───────────────────────────────────────────────────────────────
+
+    private String buildExtractionPrompt() {
+        return """
+                Tu es un expert en bulletins de salaire français.
+                Analyse cette image d'un bulletin de salaire et extrait les informations suivantes.
+                Réponds UNIQUEMENT avec un objet JSON valide, sans texte avant ou après.
+
+                RÈGLES IMPORTANTES pour les montants :
+                - SALAIRE BRUT : c'est le TOTAL de la rémunération brute AVANT toutes les cotisations, \
+                souvent libellé "Salaire Brut", "Brut Fiscal", "Total Brut" ou "Rémunération Brute". \
+                Ce montant est typiquement entre 1 000 € et 15 000 €. \
+                IGNORE les colonnes "Taux", "Base", "Unité", "Parts patronales", "Parts salariales" — \
+                ce sont des taux et bases de calcul, pas des montants de salaire total.
+                - NET À PAYER : c'est le montant FINAL versé à l'employé, souvent dans un encadré \
+                séparé en bas du bulletin. Cherche "NET A PAYER", "Net à payer", "Net versé". \
+                C'est le PLUS GRAND montant visible dans cet encadré NET A PAYER. \
+                IGNORE "Net fiscal", "Net imposable" et "Montant net social" — ce sont des montants différents.
+                - PÉRIODE : si les dates sont numériques (ex: 01-07-2021 au 31-07-2021), \
+                convertis en "Juillet 2021".
+
+                Format JSON attendu :
+                {
+                  "employeur": "nom de l'entreprise employeur, ou null",
+                  "siret": "14 chiffres sans espaces, ou null",
+                  "employe": "prénom et nom complet de l'employé, ou null",
+                  "periode": "mois et année (ex: Juillet 2021), ou null",
+                  "salaireBrut": valeur numérique décimale du brut total (ex: 4249.60), ou null,
+                  "salaireNet": valeur numérique décimale du net à payer (ex: 2865.70), ou null
+                }
+                """;
     }
 
     private String buildForensicPrompt() {
@@ -183,6 +226,51 @@ public class ClaudeVisionService {
                 """;
     }
 
+    // ── PDF rendering ─────────────────────────────────────────────────────────
+
+    private String renderPageToBase64(byte[] pdfBytes, int page, int dpi) {
+        try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
+            PDFRenderer renderer = new PDFRenderer(doc);
+            BufferedImage image = renderer.renderImageWithDPI(
+                Math.min(page, doc.getNumberOfPages() - 1), dpi);
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            ImageIO.write(image, "png", baos);
+            return Base64.getEncoder().encodeToString(baos.toByteArray());
+        } catch (Exception e) {
+            System.err.println("[VisionService] PDF rendering failed: " + e.getMessage());
+            return null;
+        }
+    }
+
+    // ── Response parsing ──────────────────────────────────────────────────────
+
+    private VisionExtraction parseExtraction(String json) {
+        try {
+            String cleaned = json.trim();
+            if (cleaned.startsWith("```")) {
+                cleaned = cleaned.replaceAll("(?s)^```[a-z]*\\n?", "").replaceAll("\\n?```$", "").trim();
+            }
+
+            JsonNode node = objectMapper.readTree(cleaned);
+
+            String employeur = getText(node, "employeur");
+            String siret     = getText(node, "siret");
+            String employe   = getText(node, "employe");
+            String periode   = getText(node, "periode");
+
+            Double brutVal = getDouble(node, "salaireBrut");
+            Double netVal  = getDouble(node, "salaireNet");
+
+            String salaireBrut = brutVal != null ? String.format("%.2f €", brutVal) : null;
+            String salaireNet  = netVal  != null ? String.format("%.2f €", netVal)  : null;
+
+            return new VisionExtraction(employeur, siret, employe, periode, salaireBrut, salaireNet);
+        } catch (Exception e) {
+            System.err.println("[VisionService] JSON parse failed: " + e.getMessage() + " | raw: " + json);
+            return null;
+        }
+    }
+
     private List<AnalysisResult.Check> parseForensicResponse(String json) {
         try {
             String cleaned = json.trim();
@@ -206,136 +294,12 @@ public class ClaudeVisionService {
             }
             return checks;
         } catch (Exception e) {
-            System.err.println("[ClaudeVision] Forensic parse failed: " + e.getMessage());
+            System.err.println("[VisionService] Forensic parse failed: " + e.getMessage());
             return List.of();
         }
     }
 
-    // ── PDF rendering ─────────────────────────────────────────────────────────
-
-    private String renderFirstPageToBase64(byte[] pdfBytes) {
-        return renderPageToBase64(pdfBytes, 0, 200);
-    }
-
-    private String renderPageToBase64(byte[] pdfBytes, int page, int dpi) {
-        try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
-            PDFRenderer renderer = new PDFRenderer(doc);
-            BufferedImage image = renderer.renderImageWithDPI(
-                Math.min(page, doc.getNumberOfPages() - 1), dpi);
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            ImageIO.write(image, "png", baos);
-            return Base64.getEncoder().encodeToString(baos.toByteArray());
-        } catch (Exception e) {
-            System.err.println("[ClaudeVision] PDF rendering failed: " + e.getMessage());
-            return null;
-        }
-    }
-
-    // ── API call ──────────────────────────────────────────────────────────────
-
-    private String callClaudeApi(String base64Image) throws Exception {
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.set("x-api-key", apiKey);
-        headers.set("anthropic-version", "2023-06-01");
-
-        ObjectNode body = objectMapper.createObjectNode();
-        body.put("model", MODEL);
-        body.put("max_tokens", 512);
-
-        ArrayNode messages = objectMapper.createArrayNode();
-        ObjectNode userMsg = objectMapper.createObjectNode();
-        userMsg.put("role", "user");
-
-        ArrayNode content = objectMapper.createArrayNode();
-
-        // Image block
-        ObjectNode imageBlock = objectMapper.createObjectNode();
-        imageBlock.put("type", "image");
-        ObjectNode source = objectMapper.createObjectNode();
-        source.put("type", "base64");
-        source.put("media_type", "image/png");
-        source.put("data", base64Image);
-        imageBlock.set("source", source);
-        content.add(imageBlock);
-
-        // Text prompt block
-        ObjectNode textBlock = objectMapper.createObjectNode();
-        textBlock.put("type", "text");
-        textBlock.put("text", buildExtractionPrompt());
-        content.add(textBlock);
-
-        userMsg.set("content", content);
-        messages.add(userMsg);
-        body.set("messages", messages);
-
-        HttpEntity<String> entity = new HttpEntity<>(objectMapper.writeValueAsString(body), headers);
-        ResponseEntity<String> response = restTemplate.exchange(ANTHROPIC_API_URL, HttpMethod.POST, entity, String.class);
-
-        JsonNode root = objectMapper.readTree(response.getBody());
-        return root.path("content").get(0).path("text").asText();
-    }
-
-    private String buildExtractionPrompt() {
-        return """
-                Tu es un expert en bulletins de salaire français.
-                Analyse cette image d'un bulletin de salaire et extrait les informations suivantes.
-                Réponds UNIQUEMENT avec un objet JSON valide, sans texte avant ou après.
-
-                RÈGLES IMPORTANTES pour les montants :
-                - SALAIRE BRUT : c'est le TOTAL de la rémunération brute AVANT toutes les cotisations, \
-                souvent libellé "Salaire Brut", "Brut Fiscal", "Total Brut" ou "Rémunération Brute". \
-                Ce montant est typiquement entre 1 000 € et 15 000 €. \
-                IGNORE les colonnes "Taux", "Base", "Unité", "Parts patronales", "Parts salariales" — \
-                ce sont des taux et bases de calcul, pas des montants de salaire total.
-                - NET À PAYER : c'est le montant FINAL versé à l'employé, souvent dans un encadré \
-                séparé en bas du bulletin. Cherche "NET A PAYER", "Net à payer", "Net versé". \
-                C'est le PLUS GRAND montant visible dans cet encadré NET A PAYER. \
-                IGNORE "Net fiscal" et "Net imposable" — ce sont des montants fiscaux annuels.
-                - PÉRIODE : si les dates sont numériques (ex: 01-07-2021 au 31-07-2021), \
-                convertis en "Juillet 2021".
-
-                Format JSON attendu :
-                {
-                  "employeur": "nom de l'entreprise employeur, ou null",
-                  "siret": "14 chiffres sans espaces, ou null",
-                  "employe": "prénom et nom complet de l'employé, ou null",
-                  "periode": "mois et année (ex: Juillet 2021), ou null",
-                  "salaireBrut": valeur numérique décimale du brut total (ex: 4249.60), ou null,
-                  "salaireNet": valeur numérique décimale du net à payer (ex: 2865.70), ou null
-                }
-                """;
-    }
-
-    // ── Response parsing ──────────────────────────────────────────────────────
-
-    private VisionExtraction parseExtraction(String json) {
-        try {
-            // Claude sometimes wraps JSON in markdown code fences — strip them
-            String cleaned = json.trim();
-            if (cleaned.startsWith("```")) {
-                cleaned = cleaned.replaceAll("(?s)^```[a-z]*\\n?", "").replaceAll("\\n?```$", "").trim();
-            }
-
-            JsonNode node = objectMapper.readTree(cleaned);
-
-            String employeur = getText(node, "employeur");
-            String siret     = getText(node, "siret");
-            String employe   = getText(node, "employe");
-            String periode   = getText(node, "periode");
-
-            Double brutVal = getDouble(node, "salaireBrut");
-            Double netVal  = getDouble(node, "salaireNet");
-
-            String salaireBrut = brutVal != null ? String.format("%.2f €", brutVal) : null;
-            String salaireNet  = netVal  != null ? String.format("%.2f €", netVal)  : null;
-
-            return new VisionExtraction(employeur, siret, employe, periode, salaireBrut, salaireNet);
-        } catch (Exception e) {
-            System.err.println("[ClaudeVision] JSON parse failed: " + e.getMessage() + " | raw: " + json);
-            return null;
-        }
-    }
+    // ── Helpers ───────────────────────────────────────────────────────────────
 
     private String getText(JsonNode node, String field) {
         JsonNode val = node.get(field);
@@ -351,7 +315,6 @@ public class ClaudeVisionService {
             double d = val.asDouble();
             return d > 0 ? d : null;
         }
-        // Sometimes Claude returns a string like "3224.64" — handle it
         try {
             double d = Double.parseDouble(val.asText().replace(",", ".").replaceAll("[^0-9.]", ""));
             return d > 0 ? d : null;
