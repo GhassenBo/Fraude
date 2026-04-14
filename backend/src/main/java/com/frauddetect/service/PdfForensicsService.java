@@ -3,10 +3,7 @@ package com.frauddetect.service;
 import com.frauddetect.model.AnalysisResult;
 import org.apache.pdfbox.cos.*;
 import org.apache.pdfbox.pdmodel.PDDocument;
-import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotation;
-import org.apache.pdfbox.text.PDFTextStripper;
-import org.apache.pdfbox.text.TextPosition;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -23,7 +20,6 @@ import java.util.List;
  *  2. Multiple content streams per page — overlay technique
  *  3. Suspicious annotations — FreeText / Stamp added by editors
  *  4. White fill rectangles — "white-out" masking technique
- *  5. Overlapping text positions — text pasted over existing text
  */
 @Service
 public class PdfForensicsService {
@@ -38,7 +34,6 @@ public class PdfForensicsService {
         checks.add(checkMultipleContentStreams(document));
         checks.add(checkSuspiciousAnnotations(document));
         checks.add(checkWhiteFillRects(document));
-        checks.add(checkTextOverlay(document));
         return checks;
     }
 
@@ -185,60 +180,6 @@ public class PdfForensicsService {
             ops.clear();
         }
         return count;
-    }
-
-    // ── Check 5 : Overlapping text positions ─────────────────────────────────
-
-    private AnalysisResult.Check checkTextOverlay(PDDocument document) {
-        try {
-            OverlapDetector detector = new OverlapDetector();
-            detector.getText(document);
-            int overlaps = detector.overlapCount;
-            if (overlaps > 0) {
-                return check("Intégrité PDF", "Texte superposé", "FAILED",
-                    overlaps + " caractère(s) placé(s) exactement sur un caractère existant"
-                        + " — indicateur fort de falsification par superposition de texte");
-            }
-            return check("Intégrité PDF", "Texte superposé", "OK",
-                "Aucune superposition de texte — positions des caractères cohérentes");
-        } catch (Exception e) {
-            return check("Intégrité PDF", "Texte superposé", "WARNING",
-                "Analyse impossible : " + e.getMessage());
-        }
-    }
-
-    // ── Inner class : overlap detector ───────────────────────────────────────
-
-    private static class OverlapDetector extends PDFTextStripper {
-        final List<float[]> pagePos = new ArrayList<>();
-        int overlapCount = 0;
-
-        OverlapDetector() throws IOException { super(); }
-
-        @Override
-        protected void startPage(PDPage page) throws IOException {
-            pagePos.clear();
-            super.startPage(page);
-        }
-
-        @Override
-        protected void processTextPosition(TextPosition text) {
-            String ch = text.getUnicode();
-            if (ch == null || ch.isBlank()) return;
-            float x = text.getXDirAdj();
-            float y = text.getYDirAdj();
-            float w = Math.max(text.getWidthDirAdj(), 1f);
-            // Tight tolerance: legitimate kerning moves characters > 1pt
-            for (float[] p : pagePos) {
-                if (Math.abs(y - p[1]) < 1.0f
-                        && x >= p[0] - 0.5f
-                        && x <= p[0] + p[2] + 0.5f) {
-                    overlapCount++;
-                    return;
-                }
-            }
-            pagePos.add(new float[]{x, y, w});
-        }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
