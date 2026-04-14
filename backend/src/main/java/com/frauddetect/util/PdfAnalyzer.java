@@ -2,6 +2,7 @@ package com.frauddetect.util;
 
 import com.frauddetect.model.AnalysisResult;
 import com.frauddetect.service.ClaudeVisionService;
+import com.frauddetect.service.PdfForensicsService;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDDocumentInformation;
@@ -17,9 +18,11 @@ import java.util.regex.*;
 public class PdfAnalyzer {
 
     private final ClaudeVisionService claudeVisionService;
+    private final PdfForensicsService forensicsService;
 
-    public PdfAnalyzer(ClaudeVisionService claudeVisionService) {
+    public PdfAnalyzer(ClaudeVisionService claudeVisionService, PdfForensicsService forensicsService) {
         this.claudeVisionService = claudeVisionService;
+        this.forensicsService = forensicsService;
     }
 
     // Known payroll software producers
@@ -63,6 +66,7 @@ public class PdfAnalyzer {
 
     public record PdfAnalysisData(
         String rawText,
+        byte[] pdfBytes,
         AnalysisResult.DocumentInfo documentInfo,
         List<AnalysisResult.Check> metadataChecks
     ) {}
@@ -181,7 +185,10 @@ public class PdfAnalyzer {
                 docInfo = regexInfo;
             }
 
-            return new PdfAnalysisData(rawText, docInfo, checks);
+            // Forensic structure analysis — runs inside the same open document (no double-load)
+            checks.addAll(forensicsService.analyze(bytes, document));
+
+            return new PdfAnalysisData(rawText, bytes, docInfo, checks);
         }
     }
 

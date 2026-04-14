@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.frauddetect.model.AnalysisResult;
 import jakarta.annotation.PostConstruct;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -16,7 +17,9 @@ import org.springframework.web.client.RestTemplate;
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.List;
 
 /**
  * Uses the Anthropic Claude Vision API to extract payslip fields from a PDF rendered as an image.
@@ -75,13 +78,141 @@ public class ClaudeVisionService {
         }
     }
 
+    // ── Forgery detection ─────────────────────────────────────────────────────
+
+    /**
+     * Sends a high-res render of the PDF to Claude with a forensic prompt.
+     * Asks Claude to look for visual signs of tampering: font inconsistencies,
+     * pixel artefacts, misaligned columns, white-out zones, etc.
+     * Returns an empty list if Vision is disabled or the call fails.
+     */
+    public List<AnalysisResult.Check> detectForgery(byte[] pdfBytes) {
+        if (!isEnabled()) return List.of();
+        try {
+            // Render at 250 DPI for maximum sharpness on forensic analysis
+            String base64Image = renderPageToBase64(pdfBytes, 0, 250);
+            if (base64Image == null) return List.of();
+            String jsonResponse = callClaudeForensicApi(base64Image);
+            return parseForensicResponse(jsonResponse);
+        } catch (Exception e) {
+            System.err.println("[ClaudeVision] Forgery detection failed: " + e.getMessage());
+            return List.of();
+        }
+    }
+
+    private String callClaudeForensicApi(String base64Image) throws Exception {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("x-api-key", apiKey);
+        headers.set("anthropic-version", "2023-06-01");
+
+        ObjectNode body = objectMapper.createObjectNode();
+        body.put("model", MODEL);
+        body.put("max_tokens", 1024);
+
+        ArrayNode messages = objectMapper.createArrayNode();
+        ObjectNode userMsg = objectMapper.createObjectNode();
+        userMsg.put("role", "user");
+        ArrayNode content = objectMapper.createArrayNode();
+
+        ObjectNode imageBlock = objectMapper.createObjectNode();
+        imageBlock.put("type", "image");
+        ObjectNode source = objectMapper.createObjectNode();
+        source.put("type", "base64");
+        source.put("media_type", "image/png");
+        source.put("data", base64Image);
+        imageBlock.set("source", source);
+        content.add(imageBlock);
+
+        ObjectNode textBlock = objectMapper.createObjectNode();
+        textBlock.put("type", "text");
+        textBlock.put("text", buildForensicPrompt());
+        content.add(textBlock);
+
+        userMsg.set("content", content);
+        messages.add(userMsg);
+        body.set("messages", messages);
+
+        HttpEntity<String> entity = new HttpEntity<>(objectMapper.writeValueAsString(body), headers);
+        ResponseEntity<String> response = restTemplate.exchange(
+            ANTHROPIC_API_URL, HttpMethod.POST, entity, String.class);
+        JsonNode root = objectMapper.readTree(response.getBody());
+        return root.path("content").get(0).path("text").asText();
+    }
+
+    private String buildForensicPrompt() {
+        return """
+                Tu es un expert légiste spécialisé dans la détection de falsification de bulletins de salaire.
+                Examine cette image TRÈS attentivement à la recherche de signes de falsification.
+
+                Analyse ces 5 points :
+
+                1. RENDU DES CHIFFRES : Les montants numériques (salaires, cotisations, totaux) \
+                ont-ils exactement la même police, épaisseur et taille que les libellés autour d'eux ? \
+                Des chiffres légèrement différents des autres (plus nets, plus flous, espacement différent) ?
+
+                2. ARTEFACTS VISUELS : Y a-t-il des zones blanches anormales, \
+                des bords nets ou un "halo" autour de certains chiffres, \
+                un flou localisé, ou des pixels parasites qui indiqueraient une retouche ?
+
+                3. ALIGNEMENT DES COLONNES : Les chiffres sont-ils parfaitement alignés \
+                dans leur colonne ? Un nombre décalé par rapport aux autres de sa colonne est suspect.
+
+                4. COHÉRENCE DES TOTAUX : Les montants visibles sont-ils mathématiquement cohérents \
+                (ex: brut - cotisations ≈ net) ? Un total impossible est un signe fort de falsification.
+
+                5. FOND DU DOCUMENT : Y a-t-il des rectangles ou zones légèrement plus blancs \
+                que le fond général, qui pourraient cacher le texte original ?
+
+                Réponds UNIQUEMENT avec ce JSON (5 findings max) :
+                {
+                  "findings": [
+                    {"status": "OK" | "WARNING" | "FAILED", "label": "nom court", "detail": "explication précise"}
+                  ]
+                }
+                Si tout est visuellement normal, un seul finding "OK" suffit.
+                """;
+    }
+
+    private List<AnalysisResult.Check> parseForensicResponse(String json) {
+        try {
+            String cleaned = json.trim();
+            if (cleaned.startsWith("```")) {
+                cleaned = cleaned.replaceAll("(?s)^```[a-z]*\\n?", "").replaceAll("\\n?```$", "").trim();
+            }
+            JsonNode root = objectMapper.readTree(cleaned);
+            JsonNode findings = root.path("findings");
+            List<AnalysisResult.Check> checks = new ArrayList<>();
+            if (findings.isArray()) {
+                for (JsonNode f : findings) {
+                    String status = f.path("status").asText("WARNING");
+                    if (!List.of("OK", "WARNING", "FAILED").contains(status)) status = "WARNING";
+                    checks.add(AnalysisResult.Check.builder()
+                        .category("Vision IA — Forensique")
+                        .label(f.path("label").asText("Analyse visuelle"))
+                        .status(status)
+                        .detail(f.path("detail").asText(""))
+                        .build());
+                }
+            }
+            return checks;
+        } catch (Exception e) {
+            System.err.println("[ClaudeVision] Forensic parse failed: " + e.getMessage());
+            return List.of();
+        }
+    }
+
     // ── PDF rendering ─────────────────────────────────────────────────────────
 
     private String renderFirstPageToBase64(byte[] pdfBytes) {
+        return renderPageToBase64(pdfBytes, 0, 200);
+    }
+
+    private String renderPageToBase64(byte[] pdfBytes, int page, int dpi) {
         try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
             PDFRenderer renderer = new PDFRenderer(doc);
-            // 200 DPI for sufficient clarity on dense tabular payslip layouts
-            BufferedImage image = renderer.renderImageWithDPI(0, 200);
+            BufferedImage image = renderer.renderImageWithDPI(
+                Math.min(page, doc.getNumberOfPages() - 1), dpi);
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             ImageIO.write(image, "png", baos);
             return Base64.getEncoder().encodeToString(baos.toByteArray());

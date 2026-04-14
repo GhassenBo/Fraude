@@ -22,6 +22,7 @@ public class FraudDetectionService {
     private final SiretVerificationService siretService;
     private final SalaryCalculationService salaryService;
     private final AiAnalysisService aiAnalysisService;
+    private final ClaudeVisionService claudeVisionService;
     private final UserRepository userRepository;
     private final AnalysisRepository analysisRepository;
 
@@ -32,12 +33,14 @@ public class FraudDetectionService {
                                   SiretVerificationService siretService,
                                   SalaryCalculationService salaryService,
                                   AiAnalysisService aiAnalysisService,
+                                  ClaudeVisionService claudeVisionService,
                                   UserRepository userRepository,
                                   AnalysisRepository analysisRepository) {
         this.pdfAnalyzer = pdfAnalyzer;
         this.siretService = siretService;
         this.salaryService = salaryService;
         this.aiAnalysisService = aiAnalysisService;
+        this.claudeVisionService = claudeVisionService;
         this.userRepository = userRepository;
         this.analysisRepository = analysisRepository;
     }
@@ -61,6 +64,9 @@ public class FraudDetectionService {
         // AI analysis (GPT-4) — optional, runs only if API key is configured
         List<AnalysisResult.Check> aiChecks = aiAnalysisService.analyze(pdfData.rawText(), pdfData.documentInfo());
         allChecks.addAll(aiChecks);
+
+        // Claude Vision forensic analysis — optional, runs only if ANTHROPIC_API_KEY is configured
+        allChecks.addAll(claudeVisionService.detectForgery(pdfData.pdfBytes()));
 
         int score = computeScore(allChecks);
         String verdict = computeVerdict(score);
