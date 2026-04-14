@@ -327,9 +327,6 @@ public class ClaudeVisionService {
             Double brutVal = getDouble(node, "salaireBrut");
             Double netVal  = getDouble(node, "salaireNet");
 
-            // Net cannot exceed brut — discard net if extraction is suspicious
-            if (brutVal != null && netVal != null && netVal > brutVal) netVal = null;
-
             String salaireBrut = brutVal != null ? String.format("%.2f €", brutVal) : null;
             String salaireNet  = netVal  != null ? String.format("%.2f €", netVal)  : null;
 

@@ -43,13 +43,6 @@ public class SalaryCalculationService {
             "total cotisations salariales", "total retenues salariales",
             "total prelevements salariales", "total charges salariales");
 
-        // If net > brut both values are likely extraction failures — discard to avoid false positives
-        if (salaireBrut != null && salaireNet != null && salaireNet > salaireBrut) {
-            salaireBrut = null;
-            salaireNet = null;
-        }
-
-
         // Check 1: Brut vs Net ratio
         if (salaireBrut != null && salaireNet != null && salaireBrut > 0) {
             double ratio = salaireNet / salaireBrut;
