@@ -74,15 +74,13 @@ public class SiretVerificationService {
             ResponseEntity<String> response = restTemplate.exchange(
                 url, HttpMethod.GET, null, String.class);
 
-            String body = response.getBody();
-            System.out.println("[SIRET] Réponse API brute : " + body);
-            JsonNode root = objectMapper.readTree(body);
+            JsonNode root = objectMapper.readTree(response.getBody());
             int total = root.path("total_results").asInt(0);
 
             if (total == 0) {
-                checks.add(check("FAILED",
-                    "SIRET " + siret + " introuvable dans la base officielle des entreprises françaises"
-                        + " — entreprise inexistante ou numéro erroné"));
+                checks.add(check("WARNING",
+                    "SIRET " + siret + " introuvable dans la base officielle"
+                        + " — numéro potentiellement mal extrait du document ou entreprise inexistante"));
                 return checks;
             }
 

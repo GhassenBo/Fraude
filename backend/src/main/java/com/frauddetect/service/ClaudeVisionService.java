@@ -158,6 +158,13 @@ public class ClaudeVisionService {
                 Analyse cette image d'un bulletin de salaire et extrait les informations suivantes.
                 Réponds UNIQUEMENT avec un objet JSON valide, sans texte avant ou après.
 
+                RÈGLE CRITIQUE pour le SIRET :
+                - Le SIRET est une séquence de 14 chiffres consécutifs. \
+                Lis-le chiffre par chiffre, de gauche à droite, sans jamais inverser ni regrouper. \
+                Attention aux confusions visuelles fréquentes : 0/6, 1/7, 5/6, 3/8. \
+                Si tu lis "SIRET : 852 070 796 00028", retourne "85207079600028" (sans espaces). \
+                Ne jamais approximer — chaque chiffre compte.
+
                 RÈGLES IMPORTANTES pour les montants :
                 - SALAIRE BRUT : c'est le TOTAL de la rémunération brute AVANT toutes les cotisations, \
                 souvent libellé "Salaire Brut", "Brut Fiscal", "Total Brut" ou "Rémunération Brute". \
