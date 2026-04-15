@@ -36,12 +36,14 @@ public class SiretVerificationService {
         }
 
         // Validate SIRET checksum (Luhn algorithm)
+        // WARNING (not FAILED): some valid SIRETs don't satisfy Luhn (public sector,
+        // older numbers, associations) — a false positive here is worse than a miss.
         if (!isValidSiretChecksum(cleaned)) {
             return AnalysisResult.Check.builder()
                 .category("Employeur")
                 .label("Numéro SIRET")
-                .status("FAILED")
-                .detail("SIRET invalide : la clé de contrôle ne correspond pas — numéro falsifié ou erroné")
+                .status("WARNING")
+                .detail("SIRET " + cleaned + " — la clé de contrôle Luhn ne correspond pas (peut être valide pour un organisme public ou une ancienne attribution)")
                 .build();
         }
 
