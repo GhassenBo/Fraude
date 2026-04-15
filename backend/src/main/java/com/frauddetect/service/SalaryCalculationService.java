@@ -48,24 +48,19 @@ public class SalaryCalculationService {
             "montant net social", "net social");
 
         // Check 0: Net social vs Net à payer cross-validation
-        // Relation: Net à payer = Net social − Impôt sur le revenu
-        // If impôt = 0 they must be equal. Any large gap means NET À PAYER was falsified.
-        if (salaireNet != null && netSocial != null) {
-            Double impot = extractAmountNearLabel(lines,
-                "impot sur le revenu preleve", "prelevement a la source", "impot sur le revenu");
-            double impotVal = (impot != null) ? impot : 0.0;
-            double expected = netSocial - impotVal;
-            double gap = Math.abs(salaireNet - expected);
-            if (gap > 50) {
-                checks.add(AnalysisResult.Check.builder()
-                    .category("Calculs")
-                    .label("Cohérence Net social / Net à payer")
-                    .status("FAILED")
-                    .detail(String.format(
-                        "Net à payer (%.2f€) ≠ Net social (%.2f€) − Impôt (%.2f€) = %.2f€ — écart de %.2f€, falsification probable du net à payer",
-                        salaireNet, netSocial, impotVal, expected, gap))
-                    .build());
-            }
+        // Invariant comptable : Net à payer = Net social − Impôt ≤ Net social (toujours)
+        // On évite d'extraire l'impôt (labels ambigus, confusions avec bases CSG)
+        // et on vérifie simplement que Net à payer ne dépasse pas Net social.
+        if (salaireNet != null && netSocial != null && salaireNet > netSocial + 50) {
+            checks.add(AnalysisResult.Check.builder()
+                .category("Calculs")
+                .label("Cohérence Net social / Net à payer")
+                .status("FAILED")
+                .detail(String.format(
+                    "Net à payer (%.2f€) supérieur au Net social (%.2f€) — impossible,"
+                        + " le net à payer a probablement été falsifié",
+                    salaireNet, netSocial))
+                .build());
         }
 
         // Check 1: Brut vs Net ratio
