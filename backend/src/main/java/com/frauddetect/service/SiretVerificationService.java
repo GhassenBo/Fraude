@@ -22,11 +22,14 @@ public class SiretVerificationService {
     private static final String INSEE_TOKEN_URL = "https://portail-api.insee.fr/token";
     private static final String INSEE_SIRET_URL  = "https://api.insee.fr/entreprises/sirene/V3.11/siret/";
 
+    @Value("${insee.api.key:}")
+    private String apiKey;          // clé API directe (mode simple)
+
     @Value("${insee.consumer.key:}")
-    private String consumerKey;
+    private String consumerKey;     // Consumer Key OAuth2 (mode avancé)
 
     @Value("${insee.consumer.secret:}")
-    private String consumerSecret;
+    private String consumerSecret;  // Consumer Secret OAuth2 (mode avancé)
 
     private final RestTemplate restTemplate = new RestTemplate();
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -37,20 +40,30 @@ public class SiretVerificationService {
 
     @PostConstruct
     public void init() {
-        if (isInseeEnabled()) {
-            System.out.println("[INSEE] ✓ Consumer Key détectée — vérification SIRET en ligne ACTIVE");
+        if (hasDirectApiKey()) {
+            System.out.println("[INSEE] ✓ Clé API directe détectée — vérification SIRET en ligne ACTIVE");
+        } else if (hasOAuth2Credentials()) {
+            System.out.println("[INSEE] ✓ Consumer Key/Secret détectés — vérification SIRET en ligne ACTIVE (OAuth2)");
             try { refreshToken(); }
             catch (Exception e) {
                 System.err.println("[INSEE] Impossible de récupérer le token au démarrage : " + e.getMessage());
             }
         } else {
-            System.out.println("[INSEE] ✗ Pas de Consumer Key — vérification SIRET hors-ligne (Luhn uniquement)");
+            System.out.println("[INSEE] ✗ Aucune clé configurée — vérification SIRET hors-ligne (Luhn uniquement)");
         }
     }
 
-    private boolean isInseeEnabled() {
+    private boolean hasDirectApiKey() {
+        return apiKey != null && !apiKey.isBlank();
+    }
+
+    private boolean hasOAuth2Credentials() {
         return consumerKey != null && !consumerKey.isBlank()
             && consumerSecret != null && !consumerSecret.isBlank();
+    }
+
+    private boolean isInseeEnabled() {
+        return hasDirectApiKey() || hasOAuth2Credentials();
     }
 
     // ── Main check ────────────────────────────────────────────────────────────
@@ -84,7 +97,7 @@ public class SiretVerificationService {
 
     private AnalysisResult.Check verifyWithInsee(String siret) {
         try {
-            String token = getValidToken();
+            String token = hasDirectApiKey() ? apiKey : getValidToken();
             HttpHeaders headers = new HttpHeaders();
             headers.setBearerAuth(token);
             HttpEntity<Void> entity = new HttpEntity<>(headers);
