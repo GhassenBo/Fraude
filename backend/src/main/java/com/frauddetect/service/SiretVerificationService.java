@@ -172,9 +172,13 @@ public class SiretVerificationService {
 
     // ── Luhn checksum ─────────────────────────────────────────────────────────
 
+    /**
+     * Luhn sur le SIREN uniquement (9 premiers chiffres).
+     * Le NIC (5 derniers chiffres du SIRET) n'a pas de checksum.
+     */
     private boolean isValidSiretChecksum(String siret) {
         int sum = 0;
-        for (int i = 0; i < 14; i++) {
+        for (int i = 0; i < 9; i++) {
             int digit = Character.getNumericValue(siret.charAt(i));
             if (i % 2 == 0) {
                 digit *= 2;
