@@ -4,189 +4,161 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.frauddetect.model.AnalysisResult;
 import jakarta.annotation.PostConstruct;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
-import org.springframework.util.LinkedMultiValueMap;
-import org.springframework.util.MultiValueMap;
-import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 
-import java.time.Instant;
-import java.util.Base64;
-import java.util.Map;
+import java.text.Normalizer;
+import java.util.ArrayList;
+import java.util.List;
 
+/**
+ * Verifies a SIRET number using the public French government API.
+ * No API key required — open data maintained by beta.gouv.fr / DINUM.
+ *
+ * Steps:
+ *  1. Format check (14 digits)
+ *  2. Luhn checksum on the SIREN (first 9 digits) — WARNING only, not FAILED
+ *  3. Live lookup via recherche-entreprises.api.gouv.fr
+ *     → checks existence and active/closed status
+ *  4. Cross-checks the official company name against the employeur on the payslip
+ */
 @Service
 public class SiretVerificationService {
 
-    private static final String INSEE_TOKEN_URL = "https://portail-api.insee.fr/token";
-    private static final String INSEE_SIRET_URL  = "https://api.insee.fr/entreprises/sirene/V3.11/siret/";
-
-    @Value("${insee.api.key:}")
-    private String apiKey;          // clé API directe (mode simple)
-
-    @Value("${insee.consumer.key:}")
-    private String consumerKey;     // Consumer Key OAuth2 (mode avancé)
-
-    @Value("${insee.consumer.secret:}")
-    private String consumerSecret;  // Consumer Secret OAuth2 (mode avancé)
+    private static final String API_URL =
+        "https://recherche-entreprises.api.gouv.fr/search?q=%s&mtq=exact";
 
     private final RestTemplate restTemplate = new RestTemplate();
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    /** Cached Bearer token and its expiry timestamp. */
-    private String cachedToken;
-    private Instant tokenExpiry = Instant.EPOCH;
-
     @PostConstruct
     public void init() {
-        if (hasDirectApiKey()) {
-            System.out.println("[INSEE] ✓ Clé API directe détectée — vérification SIRET en ligne ACTIVE");
-        } else if (hasOAuth2Credentials()) {
-            System.out.println("[INSEE] ✓ Consumer Key/Secret détectés — vérification SIRET en ligne ACTIVE (OAuth2)");
-            try { refreshToken(); }
-            catch (Exception e) {
-                System.err.println("[INSEE] Impossible de récupérer le token au démarrage : " + e.getMessage());
-            }
-        } else {
-            System.out.println("[INSEE] ✗ Aucune clé configurée — vérification SIRET hors-ligne (Luhn uniquement)");
-        }
+        System.out.println("[SIRET] Vérification via recherche-entreprises.api.gouv.fr (aucune clé API requise)");
     }
 
-    private boolean hasDirectApiKey() {
-        return apiKey != null && !apiKey.isBlank();
-    }
+    // ── Public entry point ────────────────────────────────────────────────────
 
-    private boolean hasOAuth2Credentials() {
-        return consumerKey != null && !consumerKey.isBlank()
-            && consumerSecret != null && !consumerSecret.isBlank();
-    }
+    public List<AnalysisResult.Check> verify(String siret, String employeur) {
+        List<AnalysisResult.Check> checks = new ArrayList<>();
 
-    private boolean isInseeEnabled() {
-        return hasDirectApiKey() || hasOAuth2Credentials();
-    }
-
-    // ── Main check ────────────────────────────────────────────────────────────
-
-    public AnalysisResult.Check verify(String siret) {
         if (siret == null || siret.isBlank()) {
-            return check("WARNING", "SIRET non trouvé dans le document");
+            checks.add(check("WARNING", "SIRET non trouvé dans le document"));
+            return checks;
         }
 
         String cleaned = siret.replaceAll("[^0-9]", "");
 
         if (cleaned.length() != 14) {
-            return check("FAILED", "Format SIRET invalide : " + siret
-                + " (" + cleaned.length() + " chiffres au lieu de 14)");
+            checks.add(check("FAILED",
+                "Format SIRET invalide : " + siret + " (" + cleaned.length() + " chiffres au lieu de 14)"));
+            return checks;
         }
 
         if (!isValidSiretChecksum(cleaned)) {
-            return check("WARNING",
-                "SIRET " + cleaned + " — clé de contrôle Luhn incorrecte"
-                + " (peut être valide pour un organisme public ou une ancienne attribution)");
+            checks.add(check("WARNING",
+                "SIRET " + cleaned + " — clé de contrôle SIREN incorrecte"
+                    + " (peut être valide pour certains organismes publics)"));
         }
 
-        if (isInseeEnabled()) {
-            return verifyWithInsee(cleaned);
-        }
-
-        return check("OK", "SIRET " + cleaned + " — format et clé de contrôle Luhn valides ✓");
+        checks.addAll(lookupApi(cleaned, employeur));
+        return checks;
     }
 
-    // ── INSEE API ─────────────────────────────────────────────────────────────
+    // ── API lookup ────────────────────────────────────────────────────────────
 
-    private AnalysisResult.Check verifyWithInsee(String siret) {
+    private List<AnalysisResult.Check> lookupApi(String siret, String employeur) {
+        List<AnalysisResult.Check> checks = new ArrayList<>();
         try {
-            String token = hasDirectApiKey() ? apiKey : getValidToken();
-            HttpHeaders headers = new HttpHeaders();
-            headers.setBearerAuth(token);
-            HttpEntity<Void> entity = new HttpEntity<>(headers);
+            String url = String.format(API_URL, siret);
+            ResponseEntity<String> response = restTemplate.exchange(
+                url, HttpMethod.GET, null, String.class);
 
-            ResponseEntity<Map> resp = restTemplate.exchange(
-                INSEE_SIRET_URL + siret, HttpMethod.GET, entity, Map.class);
+            JsonNode root = objectMapper.readTree(response.getBody());
+            int total = root.path("total_results").asInt(0);
 
-            if (resp.getStatusCode().is2xxSuccessful()) {
-                // Extract company name and status if available
-                String detail = "SIRET " + siret + " vérifié et actif dans la base INSEE ✓";
-                try {
-                    JsonNode body = objectMapper.valueToTree(resp.getBody());
-                    JsonNode etablissement = body.path("etablissement");
-                    String etat = etablissement.path("periodeEtablissement").get(0)
-                        .path("etatAdministratifEtablissement").asText("");
-                    if ("F".equals(etat)) {
-                        return check("FAILED", "SIRET " + siret
-                            + " trouvé dans la base INSEE mais établissement FERMÉ");
-                    }
-                } catch (Exception ignored) {}
-                return check("OK", detail);
+            if (total == 0) {
+                checks.add(check("FAILED",
+                    "SIRET " + siret + " introuvable dans la base officielle des entreprises françaises"
+                        + " — entreprise inexistante ou numéro erroné"));
+                return checks;
             }
-        } catch (HttpClientErrorException.NotFound e) {
-            return check("FAILED", "SIRET " + siret
-                + " introuvable dans la base INSEE — entreprise inexistante ou fermée");
-        } catch (HttpClientErrorException.Unauthorized | HttpClientErrorException.Forbidden e) {
-            // Token expired mid-request — retry once after refresh
-            try {
-                refreshToken();
-                return verifyWithInsee(siret);
-            } catch (Exception ignored) {}
-            return check("WARNING", "INSEE : token expiré, vérification impossible");
+
+            JsonNode company = root.path("results").get(0);
+            String nomOfficiel = company.path("nom_complet").asText("").trim();
+            String etatUniteLegale = company.path("etat_administratif").asText("A");
+
+            // Check establishment (établissement) status specifically
+            boolean etablissementActif = true;
+            JsonNode etablissements = company.path("matching_etablissements");
+            if (etablissements.isArray() && etablissements.size() > 0) {
+                String etatEtab = etablissements.get(0).path("etat_administratif").asText("A");
+                etablissementActif = "A".equals(etatEtab);
+            }
+
+            if (!etablissementActif || "C".equals(etatUniteLegale) || "F".equals(etatUniteLegale)) {
+                checks.add(check("FAILED",
+                    "SIRET " + siret + " — établissement FERMÉ (" + nomOfficiel + ")"
+                        + " dans la base officielle"));
+                return checks;
+            }
+
+            // SIRET exists and is active
+            checks.add(check("OK",
+                "SIRET " + siret + " vérifié — " + nomOfficiel + " (actif) ✓"));
+
+            // Cross-check company name against payslip employeur
+            if (employeur != null && !employeur.isBlank() && !nomOfficiel.isBlank()) {
+                String normPayslip  = normalize(employeur);
+                String normOfficiel = normalize(nomOfficiel);
+                if (!normOfficiel.contains(normPayslip)
+                        && !normPayslip.contains(normOfficiel)
+                        && !sharesSignificantWord(normPayslip, normOfficiel)) {
+                    checks.add(check("WARNING",
+                        "Nom employeur sur la fiche (\"" + employeur + "\")"
+                            + " ≠ raison sociale officielle (\"" + nomOfficiel + "\")"
+                            + " — vérifier s'il s'agit d'une filiale ou d'une abréviation"));
+                }
+            }
+
         } catch (Exception e) {
-            System.err.println("[INSEE] Erreur API : " + e.getMessage());
-            return check("WARNING", "INSEE indisponible — vérification Luhn uniquement : SIRET " + siret + " valide");
+            System.err.println("[SIRET] API indisponible : " + e.getMessage());
+            // Do not add a FAILED — format + Luhn were already evaluated above
+            checks.add(check("WARNING",
+                "SIRET " + siret + " — vérification en ligne impossible (API indisponible),"
+                    + " format 14 chiffres valide"));
         }
-        return check("WARNING", "Réponse INSEE inattendue");
+        return checks;
     }
 
-    // ── OAuth2 token management ───────────────────────────────────────────────
+    // ── Luhn on SIREN (first 9 digits only) ──────────────────────────────────
 
-    private String getValidToken() throws Exception {
-        if (cachedToken != null && Instant.now().isBefore(tokenExpiry)) {
-            return cachedToken;
-        }
-        refreshToken();
-        return cachedToken;
-    }
-
-    private void refreshToken() throws Exception {
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
-        // Basic auth: Base64(consumerKey:consumerSecret)
-        String credentials = Base64.getEncoder()
-            .encodeToString((consumerKey + ":" + consumerSecret).getBytes());
-        headers.set("Authorization", "Basic " + credentials);
-
-        MultiValueMap<String, String> body = new LinkedMultiValueMap<>();
-        body.add("grant_type", "client_credentials");
-
-        HttpEntity<MultiValueMap<String, String>> request = new HttpEntity<>(body, headers);
-        ResponseEntity<String> response = restTemplate.exchange(
-            INSEE_TOKEN_URL, HttpMethod.POST, request, String.class);
-
-        JsonNode json = objectMapper.readTree(response.getBody());
-        cachedToken = json.path("access_token").asText();
-        long expiresIn = json.path("expires_in").asLong(3600);
-        // Refresh 60s before expiry to avoid edge cases
-        tokenExpiry = Instant.now().plusSeconds(expiresIn - 60);
-        System.out.println("[INSEE] Token Bearer obtenu, valide " + expiresIn / 3600 + "h");
-    }
-
-    // ── Luhn checksum ─────────────────────────────────────────────────────────
-
-    /**
-     * Luhn sur le SIREN uniquement (9 premiers chiffres).
-     * Le NIC (5 derniers chiffres du SIRET) n'a pas de checksum.
-     */
     private boolean isValidSiretChecksum(String siret) {
         int sum = 0;
         for (int i = 0; i < 9; i++) {
             int digit = Character.getNumericValue(siret.charAt(i));
-            if (i % 2 == 0) {
-                digit *= 2;
-                if (digit > 9) digit -= 9;
-            }
+            if (i % 2 == 0) { digit *= 2; if (digit > 9) digit -= 9; }
             sum += digit;
         }
         return sum % 10 == 0;
+    }
+
+    // ── Name normalisation helpers ────────────────────────────────────────────
+
+    private String normalize(String s) {
+        return Normalizer.normalize(s.toLowerCase(), Normalizer.Form.NFD)
+            .replaceAll("[\\p{InCombiningDiacriticalMarks}]", "")
+            .replaceAll("[^a-z0-9\\s]", " ")
+            .replaceAll("\\s+", " ")
+            .trim();
+    }
+
+    /** Returns true if the two names share at least one word longer than 4 chars. */
+    private boolean sharesSignificantWord(String a, String b) {
+        for (String word : a.split("\\s+")) {
+            if (word.length() > 4 && b.contains(word)) return true;
+        }
+        return false;
     }
 
     // ── Helper ────────────────────────────────────────────────────────────────
@@ -194,7 +166,7 @@ public class SiretVerificationService {
     private AnalysisResult.Check check(String status, String detail) {
         return AnalysisResult.Check.builder()
             .category("Employeur")
-            .label("Numéro SIRET")
+            .label("Vérification SIRET")
             .status(status)
             .detail(detail)
             .build();
