@@ -62,7 +62,6 @@ public class AiAnalysisService {
 
             Voici les informations extraites automatiquement du document :
             - Employeur    : %s
-            - SIRET        : %s
             - Employé      : %s
             - Période      : %s
             - Salaire brut : %s
@@ -90,7 +89,6 @@ public class AiAnalysisService {
             }
             """,
             safe(docInfo.getEmployeur()),
-            safe(docInfo.getSiret()),
             safe(docInfo.getEmploye()),
             safe(docInfo.getPeriode()),
             safe(docInfo.getSalaireBrut()),
