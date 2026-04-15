@@ -133,11 +133,17 @@ public class SiretVerificationService {
 
     // ── Luhn on SIREN (first 9 digits only) ──────────────────────────────────
 
+    /**
+     * Luhn standard sur le SIREN (9 premiers chiffres).
+     * Pour 9 chiffres : double les indices impairs depuis la gauche
+     * = positions paires depuis la droite (2, 4, 6, 8) = Luhn standard.
+     * Le chiffre de contrôle est à l'index 8 (droite), non doublé.
+     */
     private boolean isValidSiretChecksum(String siret) {
         int sum = 0;
         for (int i = 0; i < 9; i++) {
             int digit = Character.getNumericValue(siret.charAt(i));
-            if (i % 2 == 0) { digit *= 2; if (digit > 9) digit -= 9; }
+            if (i % 2 == 1) { digit *= 2; if (digit > 9) digit -= 9; }
             sum += digit;
         }
         return sum % 10 == 0;
