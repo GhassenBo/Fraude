@@ -27,7 +27,7 @@ import java.util.List;
 public class SiretVerificationService {
 
     private static final String API_URL =
-        "https://recherche-entreprises.api.gouv.fr/search?q=%s&mtq=exact";
+        "https://recherche-entreprises.api.gouv.fr/search?q=%s";
 
     private final RestTemplate restTemplate = new RestTemplate();
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -74,7 +74,9 @@ public class SiretVerificationService {
             ResponseEntity<String> response = restTemplate.exchange(
                 url, HttpMethod.GET, null, String.class);
 
-            JsonNode root = objectMapper.readTree(response.getBody());
+            String body = response.getBody();
+            System.out.println("[SIRET] Réponse API brute : " + body);
+            JsonNode root = objectMapper.readTree(body);
             int total = root.path("total_results").asInt(0);
 
             if (total == 0) {
