@@ -75,12 +75,6 @@ public class AiAnalysisService {
             Analyse ce document et détecte toute anomalie, incohérence ou signe de falsification.
             Vérifie notamment :
             - La cohérence entre l'intitulé du poste et le niveau de salaire
-            - L'existence et la cohérence de la convention collective mentionnée
-              (elle peut apparaître sous diverses formes : "Convention collective",
-              "Conv. Collective", "Conv.Collective", "CCN", "IDCC XXXX", ou directement
-              par le nom d'une CCN : "Syntec", "Métallurgie", "Bâtiment", "Commerce de détail",
-              "Transports routiers", "Bureaux d'études"… Si l'une de ces formes est présente,
-              considère que la convention collective EST mentionnée)
             - Les libellés de cotisations inhabituels ou absents
             - La cohérence des dates (période, ancienneté, congés)
             - La présence de formulations copiées-collées ou génériques
