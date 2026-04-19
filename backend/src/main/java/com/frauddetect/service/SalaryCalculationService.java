@@ -183,13 +183,17 @@ public class SalaryCalculationService {
         // Required fields on a French pay slip — keys are already diacritic-free
         Map<String, String> requiredFields = new LinkedHashMap<>();
         requiredFields.put("siret", "Numéro SIRET employeur");
-        requiredFields.put("convention collective", "Convention collective");
         requiredFields.put("conges payes", "Congés payés");
         requiredFields.put("net a payer", "Net à payer");
         requiredFields.put("cotisation", "Lignes de cotisations");
 
         int missing = 0;
         List<String> missingList = new ArrayList<>();
+        // Convention collective — vérification élargie (labels abrégés, IDCC, noms de CCN courants)
+        if (!hasConventionCollective(normalized)) {
+            missing++;
+            missingList.add("Convention collective");
+        }
         for (Map.Entry<String, String> entry : requiredFields.entrySet()) {
             if (!normalized.contains(entry.getKey())) {
                 missing++;
@@ -221,6 +225,24 @@ public class SalaryCalculationService {
         }
 
         return checks;
+    }
+
+    /**
+     * Détecte la mention de convention collective sous ses multiples formes :
+     * libellé complet, abréviation (CCN, IDCC), ou nom d'une CCN courante.
+     * Le texte passé doit être déjà normalisé (minuscules + sans diacritiques).
+     */
+    private boolean hasConventionCollective(String normalized) {
+        String[] indicators = {
+            "convention collective", "conv. collective", "conv.collective",
+            "convention coll", " ccn ", "ccn:", "ccn\t", "idcc",
+            "syntec", "metallurgie", "batiment", "commerce de detail",
+            "transports routiers", "bureaux d'etudes", "bureaux d\u2019etudes"
+        };
+        for (String indicator : indicators) {
+            if (normalized.contains(indicator)) return true;
+        }
+        return false;
     }
 
     /**

@@ -169,8 +169,11 @@ public class PdfAnalyzer {
             AnalysisResult.DocumentInfo docInfo;
             if (vision != null) {
                 docInfo = AnalysisResult.DocumentInfo.builder()
+                    // SIRET : regex PDFBox en priorité (Vision hallucine des chiffres),
+                    // Vision sert de fallback uniquement si PDFBox n'a rien trouvé.
+                    .siret(mergedSiret(regexInfo.getSiret(), vision.siret()))
+                    // Tous les autres champs : Vision prioritaire, regex en fallback.
                     .employeur(coalesce(vision.employeur(), regexInfo.getEmployeur()))
-                    .siret(coalesce(vision.siret(), regexInfo.getSiret()))
                     .employe(coalesce(vision.employe(), regexInfo.getEmploye()))
                     .periode(coalesce(vision.periode(), regexInfo.getPeriode()))
                     .salaireBrut(coalesce(vision.salaireBrut(), regexInfo.getSalaireBrut()))
@@ -228,6 +231,18 @@ public class PdfAnalyzer {
 
     private static <T> T coalesce(T first, T second) {
         return first != null ? first : second;
+    }
+
+    /**
+     * Fusionne le SIRET extrait par regex PDFBox (prioritaire) et par Vision (fallback).
+     * Loggue si les deux sources donnent des valeurs différentes pour faciliter le diagnostic.
+     */
+    private String mergedSiret(String regexSiret, String visionSiret) {
+        if (regexSiret != null && visionSiret != null && !regexSiret.equals(visionSiret)) {
+            System.out.println("[SIRET] Divergence regex/Vision — regex: " + regexSiret
+                + " | Vision: " + visionSiret + " → regex PDFBox prioritaire");
+        }
+        return regexSiret != null ? regexSiret : visionSiret;
     }
 
     // ── Employeur ─────────────────────────────────────────────────────────────
@@ -476,12 +491,36 @@ public class PdfAnalyzer {
     // ── SIRET ─────────────────────────────────────────────────────────────────
 
     private String extractSiret(String text) {
-        // Explicit "SIRET : XXXXXXXXXXXXXX" label
-        Matcher m = Pattern.compile("(?i)siret\\s*[:\\s]+([0-9]{3}[\\s]?[0-9]{3}[\\s]?[0-9]{3}[\\s]?[0-9]{5})").matcher(text);
-        if (m.find()) return m.group(1).replaceAll("\\s", "");
-        // Bare 14-digit number
-        m = Pattern.compile("\\b([0-9]{14})\\b").matcher(text);
+        // Priorité 1 : label SIRET explicite — couvre :
+        //   "SIRET : 123 456 789 01234"
+        //   "N° SIRET : 12345678901234"
+        //   "SIRET-123 456 789 01234"
+        //   "N°SIRET123456789 01234"
+        Matcher m = Pattern.compile(
+            "(?i)(?:n[o°°]?\\s*)?siret\\s*[:=\\-\\s]+"
+            + "([0-9]{3}[\\s\u00a0]?[0-9]{3}[\\s\u00a0]?[0-9]{3}[\\s\u00a0]?[0-9]{5})"
+        ).matcher(text);
+        while (m.find()) {
+            String cleaned = m.group(1).replaceAll("[\\s\u00a0]", "");
+            if (cleaned.length() == 14) return cleaned;
+        }
+        // Priorité 2 : label SIREN + 14 chiffres (certains bulletins marquent "SIREN")
+        m = Pattern.compile(
+            "(?i)siren\\s*[:=\\-\\s]+"
+            + "([0-9]{3}[\\s\u00a0]?[0-9]{3}[\\s\u00a0]?[0-9]{3}[\\s\u00a0]?[0-9]{5})"
+        ).matcher(text);
+        while (m.find()) {
+            String cleaned = m.group(1).replaceAll("[\\s\u00a0]", "");
+            if (cleaned.length() == 14) return cleaned;
+        }
+        // Priorité 3 : 14 chiffres consécutifs isolés (dernier recours)
+        m = Pattern.compile("(?<![0-9])([0-9]{14})(?![0-9])").matcher(text);
         if (m.find()) return m.group(1);
+        // Priorité 4 : format espacé XXX XXX XXX XXXXX isolé
+        m = Pattern.compile(
+            "(?<![0-9])([0-9]{3}[\\s\u00a0][0-9]{3}[\\s\u00a0][0-9]{3}[\\s\u00a0][0-9]{5})(?![0-9])"
+        ).matcher(text);
+        if (m.find()) return m.group(1).replaceAll("[\\s\u00a0]", "");
         return null;
     }
 }
