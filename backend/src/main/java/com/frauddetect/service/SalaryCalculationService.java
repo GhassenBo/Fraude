@@ -35,8 +35,7 @@ public class SalaryCalculationService {
         }
         if (salaireNet == null) {
             salaireNet = extractAmountNearLabel(lines,
-                "net a payer", "net paye", "net verse",
-                "net avant impot");
+                "net a payer", "net paye", "net verse");
         }
 
         Double totalCotisations = extractAmountNearLabel(lines,
@@ -46,6 +45,23 @@ public class SalaryCalculationService {
         // Net social extracted independently — used to cross-validate NET À PAYER
         Double netSocial = extractAmountNearLabel(lines,
             "montant net social", "net social");
+
+        // Net avant impôt sur le revenu (= net avant PAS).
+        // Distinct du net à payer final : le PAS varie de 0% à 45% selon l'employé
+        // et ne doit pas fausser le ratio CCN ni le check cohérence cotisations.
+        Double netAvantImpot = extractAmountNearLabel(lines,
+            "net a payer avant impot sur le revenu",
+            "net a payer avant impot",
+            "net avant prelevement a la source",
+            "net avant prelevement",
+            "net imposable");
+
+        // Montant du prélèvement à la source — extraction sur la même ligne uniquement.
+        // La fenêtre ±4 lignes de extractAmountNearLabel retournerait le net avant impôt
+        // (valeur plus grande, adjacente) au lieu du PAS lui-même.
+        Double montantPAS = extractAmountOnSameLine(lines,
+            "prelevement a la source",
+            "retenue a la source");
 
         // Check 0: Net social vs Net à payer cross-validation
         // Invariant comptable : Net à payer = Net social − Impôt ≤ Net social (toujours)
@@ -154,13 +170,17 @@ public class SalaryCalculationService {
         // Check 4: Required fields present
         checks.addAll(checkRequiredFields(text));
 
-        // Check 5: Ratio Net/Brut par CCN
-        AnalysisResult.Check ratioCcn = checkNetBrutRatio(salaireBrut, salaireNet, text);
+        // Check 5: Ratio Net/Brut par CCN — utilise le net avant impôt (avant PAS)
+        AnalysisResult.Check ratioCcn = checkNetBrutRatio(salaireBrut, netAvantImpot, salaireNet, text);
         if (ratioCcn != null) checks.add(ratioCcn);
 
         // Check 6: Somme individuelle des lignes de cotisations
         AnalysisResult.Check cotisSum = checkCotisationsSum(text, salaireBrut, salaireNet);
         if (cotisSum != null) checks.add(cotisSum);
+
+        // Check 7: Cohérence prélèvement à la source
+        AnalysisResult.Check pasCheck = checkPAS(netAvantImpot, montantPAS, salaireNet);
+        if (pasCheck != null) checks.add(pasCheck);
 
         return checks;
     }
@@ -282,11 +302,18 @@ public class SalaryCalculationService {
 
     /**
      * Vérifie que le ratio Net/Brut est dans la plage attendue pour la CCN détectée.
+     * Utilise le net avant impôt (avant PAS) en priorité : le PAS varie de 0% à 45%
+     * selon le taux personnel de l'employé et fausserait le ratio attendu.
+     * Fall-back sur le net à payer final si net avant impôt non disponible (bulletin pré-2019).
      * Plages basées sur les charges salariales françaises 2024 (régime général).
-     * Retourne null si brut ou net n'est pas disponible (check ignoré silencieusement).
      */
-    private AnalysisResult.Check checkNetBrutRatio(Double brut, Double net, String text) {
-        if (brut == null || net == null || brut <= 0) return null;
+    private AnalysisResult.Check checkNetBrutRatio(Double brut, Double netAvantImpot,
+                                                    Double netFinal, String text) {
+        if (brut == null || brut <= 0) return null;
+        Double net = netAvantImpot != null ? netAvantImpot : netFinal;
+        if (net == null) return null;
+
+        String netLabel = netAvantImpot != null ? "Net avant impôt" : "Net à payer";
 
         String normalized = normalizeDiacritics(text);
         double min, max;
@@ -306,8 +333,8 @@ public class SalaryCalculationService {
                 .label("Ratio Net/Brut CCN")
                 .status("FAILED")
                 .detail(String.format(
-                    "Ratio Net/Brut de %.1f%% hors plage attendue [%.0f%%–%.0f%%] pour la CCN %s",
-                    ratio * 100, min * 100, max * 100, ccn))
+                    "%s/Brut de %.1f%% hors plage attendue [%.0f%%–%.0f%%] pour la CCN %s",
+                    netLabel, ratio * 100, min * 100, max * 100, ccn))
                 .build();
         }
         return AnalysisResult.Check.builder()
@@ -315,8 +342,49 @@ public class SalaryCalculationService {
             .label("Ratio Net/Brut CCN")
             .status("OK")
             .detail(String.format(
-                "Ratio Net/Brut de %.1f%% dans la plage [%.0f%%–%.0f%%] pour la CCN %s",
-                ratio * 100, min * 100, max * 100, ccn))
+                "%s/Brut de %.1f%% dans la plage [%.0f%%–%.0f%%] pour la CCN %s",
+                netLabel, ratio * 100, min * 100, max * 100, ccn))
+            .build();
+    }
+
+    // ── Check 7 : Cohérence prélèvement à la source ───────────────────────────
+
+    /**
+     * Vérifie l'équation : Net avant PAS − PAS = Net à payer final (tolérance 2€).
+     * Un écart > 2€ indique que le net à payer a pu être falsifié après génération.
+     * Ignoré silencieusement si net avant impôt ou net final ne sont pas disponibles.
+     */
+    private AnalysisResult.Check checkPAS(Double netAvantImpot, Double pas, Double netFinal) {
+        if (netAvantImpot == null || netFinal == null) return null;
+
+        if (pas == null) {
+            // Pas de ligne PAS trouvée — soit taux 0%, soit label non reconnu.
+            // Si les deux nets sont proches, le PAS est effectivement nul (OK).
+            // Sinon, on ne peut pas conclure → check ignoré.
+            return Math.abs(netAvantImpot - netFinal) <= 2 ? null : null;
+        }
+
+        double calculatedNet = netAvantImpot - pas;
+        double ecart = Math.abs(calculatedNet - netFinal);
+
+        if (ecart > 2) {
+            return AnalysisResult.Check.builder()
+                .category("Calculs")
+                .label("Prélèvement à la source")
+                .status("WARNING")
+                .detail(String.format(
+                    "Net avant PAS (%.2f€) − PAS (%.2f€) = %.2f€ ≠ Net à payer (%.2f€)"
+                        + " — écart de %.2f€, incohérence prélèvement à la source",
+                    netAvantImpot, pas, calculatedNet, netFinal, ecart))
+                .build();
+        }
+        return AnalysisResult.Check.builder()
+            .category("Calculs")
+            .label("Prélèvement à la source")
+            .status("OK")
+            .detail(String.format(
+                "Net avant PAS (%.2f€) − PAS (%.2f€) = %.2f€ ≈ Net à payer (%.2f€) — cohérent",
+                netAvantImpot, pas, calculatedNet, netFinal))
             .build();
     }
 
@@ -384,6 +452,24 @@ public class SalaryCalculationService {
                 "Brut (%.2f€) − cotisations salarié (%.2f€, %d lignes) ≈ Net (%.2f€) — cohérent (écart %.2f€)",
                 brut, sum, count, net, ecart))
             .build();
+    }
+
+    /**
+     * Like extractAmountNearLabel but scans the SAME LINE ONLY (no window expansion).
+     * Used for values that are always on the same line as their label (e.g. PAS amount),
+     * to avoid cross-contaminating with adjacent lines that carry larger amounts.
+     */
+    private Double extractAmountOnSameLine(String[] lines, String... labels) {
+        for (String line : lines) {
+            String norm = normalizeDiacritics(line);
+            for (String label : labels) {
+                if (norm.contains(label)) {
+                    Double val = largestAmountInLine(line);
+                    if (val != null) return val;
+                }
+            }
+        }
+        return null;
     }
 
     /** Returns the LARGEST plausible salary amount (100–200 000) found in a single line. */

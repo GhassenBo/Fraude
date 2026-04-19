@@ -243,20 +243,39 @@ class SalaryCalculationServiceTest {
     // ── checkNetBrutRatio (CCN) ───────────────────────────────────────────────
 
     @Test
-    void checkNetBrutRatio_syntec_withinRange_shouldBeOK() {
-        // Syntec: [0.74, 0.82] — ratio 78% is within range
+    void checkNetBrutRatio_syntec_usesNetAvantImpot_whenPresent() {
+        // net avant impôt = 3 120,00 (78% de 4000) → dans la plage Syntec [74–82%].
+        // net à payer final = 2 800,00 (70%) — hors plage, mais NE DOIT PAS être utilisé.
+        // Format "3 120,00" nécessaire : largestAmountInLine ne parse pas les entiers >3 chiffres
+        // sans séparateur (ex: "3120.00" serait capturé comme "312").
+        String text = "net a payer avant impot 3 120,00\n" +
+            "prelevement a la source 320,00\n" +
+            "net a payer\nsiret\ncotisation\nconges payes\nConv. Collective : Syntec";
+
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(
+            text, docInfo("4000.00 €", "2800.00 €"));
+
+        AnalysisResult.Check check = findCheck(checks, "Ratio Net/Brut CCN");
+        assertThat(check.getStatus()).isEqualTo("OK");
+        assertThat(check.getDetail()).contains("Net avant impôt");
+        assertThat(check.getDetail()).contains("Syntec");
+    }
+
+    @Test
+    void checkNetBrutRatio_syntec_fallsBackToNetFinal_whenNoAvantImpot() {
+        // Aucun label "net avant impôt" dans le texte → fallback sur net à payer (78%)
         List<AnalysisResult.Check> checks = service.analyzeCalculations(
             "net a payer\nsiret\ncotisation\nconges payes\nConv. Collective : Syntec",
             docInfo("4000.00 €", "3120.00 €")); // 78%
 
         AnalysisResult.Check check = findCheck(checks, "Ratio Net/Brut CCN");
         assertThat(check.getStatus()).isEqualTo("OK");
-        assertThat(check.getDetail()).contains("Syntec");
+        assertThat(check.getDetail()).contains("Net à payer");
     }
 
     @Test
     void checkNetBrutRatio_syntec_belowRange_shouldFail() {
-        // Syntec: [0.74, 0.82] — ratio 70% is below 74%
+        // Syntec: [0.74, 0.82] — ratio 70% est sous 74%
         List<AnalysisResult.Check> checks = service.analyzeCalculations(
             "net a payer\nsiret\ncotisation\nconges payes\nConv. Collective : Syntec",
             docInfo("4000.00 €", "2800.00 €")); // 70%
@@ -356,6 +375,68 @@ class SalaryCalculationServiceTest {
         AnalysisResult.Check check = findCheck(checks, "Somme des cotisations");
         assertThat(check.getStatus()).isEqualTo("WARNING");
         assertThat(check.getDetail()).contains("arrondi");
+    }
+
+    // ── checkPAS ──────────────────────────────────────────────────────────────
+
+    @Test
+    void checkPAS_coherent_shouldBeOK() {
+        // net avant PAS = 3 036,60 ; PAS = 170,88 ; net final = 3036.60 - 170.88 = 2865.72
+        // PAS extrait par extractAmountOnSameLine → prend 170,88 sur sa propre ligne,
+        // pas le 3 036,60 de la ligne voisine.
+        String text = "net a payer avant impot 3 036,60\n" +
+            "prelevement a la source 170,88\n" +
+            "net a payer\nsiret\ncotisation\nconges payes\nconvention collective";
+
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(
+            text, docInfo("4000.00 €", "2865.72 €"));
+
+        AnalysisResult.Check check = findCheck(checks, "Prélèvement à la source");
+        assertThat(check.getStatus()).isEqualTo("OK");
+        assertThat(check.getDetail()).contains("3036.60");
+        assertThat(check.getDetail()).contains("170.88");
+    }
+
+    @Test
+    void checkPAS_netFinalFalsified_shouldWarn() {
+        // net avant PAS = 3 036,60 ; PAS = 170,88 → expected net = 2865.72
+        // net déclaré = 3 507,16 (falsifié +641€)
+        String text = "net a payer avant impot 3 036,60\n" +
+            "prelevement a la source 170,88\n" +
+            "net a payer\nsiret\ncotisation\nconges payes\nconvention collective";
+
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(
+            text, docInfo("4000.00 €", "3507.16 €"));
+
+        AnalysisResult.Check check = findCheck(checks, "Prélèvement à la source");
+        assertThat(check.getStatus()).isEqualTo("WARNING");
+        assertThat(check.getDetail()).contains("incohérence");
+    }
+
+    @Test
+    void checkPAS_noPasLine_netsSimilar_checkSkipped() {
+        // Pas de ligne PAS → check ignoré (retourne null)
+        String text = "net a payer avant impot 865,72\n" +
+            "net a payer\nsiret\ncotisation\nconges payes\nconvention collective";
+
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(
+            text, docInfo("1200.00 €", "865.72 €"));
+
+        boolean hasPasCheck = checks.stream()
+            .anyMatch(c -> "Prélèvement à la source".equals(c.getLabel()));
+        assertThat(hasPasCheck).isFalse();
+    }
+
+    @Test
+    void checkPAS_noNetAvantImpot_checkSkipped() {
+        // Aucun label "net avant impôt" → check ignoré
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(
+            "net a payer\nsiret\ncotisation\nconges payes\nconvention collective",
+            docInfo("4000.00 €", "3000.00 €"));
+
+        boolean hasPasCheck = checks.stream()
+            .anyMatch(c -> "Prélèvement à la source".equals(c.getLabel()));
+        assertThat(hasPasCheck).isFalse();
     }
 
     @Test
