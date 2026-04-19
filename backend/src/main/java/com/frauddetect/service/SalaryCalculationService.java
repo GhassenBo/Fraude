@@ -154,6 +154,14 @@ public class SalaryCalculationService {
         // Check 4: Required fields present
         checks.addAll(checkRequiredFields(text));
 
+        // Check 5: Ratio Net/Brut par CCN
+        AnalysisResult.Check ratioCcn = checkNetBrutRatio(salaireBrut, salaireNet, text);
+        if (ratioCcn != null) checks.add(ratioCcn);
+
+        // Check 6: Somme individuelle des lignes de cotisations
+        AnalysisResult.Check cotisSum = checkCotisationsSum(text, salaireBrut, salaireNet);
+        if (cotisSum != null) checks.add(cotisSum);
+
         return checks;
     }
 
@@ -268,6 +276,114 @@ public class SalaryCalculationService {
             }
         }
         return best;
+    }
+
+    // ── Check 5 : Ratio Net/Brut par CCN ─────────────────────────────────────
+
+    /**
+     * Vérifie que le ratio Net/Brut est dans la plage attendue pour la CCN détectée.
+     * Plages basées sur les charges salariales françaises 2024 (régime général).
+     * Retourne null si brut ou net n'est pas disponible (check ignoré silencieusement).
+     */
+    private AnalysisResult.Check checkNetBrutRatio(Double brut, Double net, String text) {
+        if (brut == null || net == null || brut <= 0) return null;
+
+        String normalized = normalizeDiacritics(text);
+        double min, max;
+        String ccn;
+        if (normalized.contains("syntec")) {
+            min = 0.74; max = 0.82; ccn = "Syntec";
+        } else if (normalized.contains("metallurgie")) {
+            min = 0.72; max = 0.80; ccn = "Métallurgie";
+        } else {
+            min = 0.70; max = 0.83; ccn = "standard";
+        }
+
+        double ratio = net / brut;
+        if (ratio < min || ratio > max) {
+            return AnalysisResult.Check.builder()
+                .category("Calculs")
+                .label("Ratio Net/Brut CCN")
+                .status("FAILED")
+                .detail(String.format(
+                    "Ratio Net/Brut de %.1f%% hors plage attendue [%.0f%%–%.0f%%] pour la CCN %s",
+                    ratio * 100, min * 100, max * 100, ccn))
+                .build();
+        }
+        return AnalysisResult.Check.builder()
+            .category("Calculs")
+            .label("Ratio Net/Brut CCN")
+            .status("OK")
+            .detail(String.format(
+                "Ratio Net/Brut de %.1f%% dans la plage [%.0f%%–%.0f%%] pour la CCN %s",
+                ratio * 100, min * 100, max * 100, ccn))
+            .build();
+    }
+
+    // ── Check 6 : Somme des cotisations salarié ───────────────────────────────
+
+    // Regex cotisation — format standard : "Label   taux%   base   montant_sal"
+    // Exclut les lignes résumé (total, cumul, net, brut…) et les lignes sans taux.
+    // [0-9]{1,6} pour la base couvre les salaires jusqu'à 999 999 € (ex: "3000,00" ou "3 000,00").
+    private static final Pattern COTIS_LINE = Pattern.compile(
+        "(?im)" +
+        "^(?!\\s*(?:total|cumul|net\\b|brut\\b|salaire\\b|remun|base\\b|libelle|periode|conge|prime\\b)).{0,65}?" +
+        "\\d{1,2}[.,]\\d{2,4}\\s*%" +                                // taux (non capturé)
+        "\\s+[0-9]{1,6}(?:[\\s\u00a0][0-9]{3})*[.,][0-9]{2}(?![0-9%])" + // base (non capturé, jusqu'à 6 chiffres)
+        "\\s+([0-9]{1,5}(?:[\\s\u00a0][0-9]{3})*[.,][0-9]{2})(?![0-9%])"  // montant salarié (capturé)
+    );
+
+    /**
+     * Somme les montants salarié de chaque ligne de cotisation (format : label taux% base montant).
+     * Vérifie que Brut − somme ≈ Net (tolérance 50€).
+     * Retourne null si moins de 3 lignes sont détectées (pas assez pour être fiable).
+     */
+    private AnalysisResult.Check checkCotisationsSum(String text, Double brut, Double net) {
+        if (brut == null || net == null || brut <= 0) return null;
+
+        double sum = 0;
+        int count = 0;
+        Matcher m = COTIS_LINE.matcher(text);
+        while (m.find()) {
+            String raw = m.group(1).replaceAll("[\\s\u00a0]", "").replace(",", ".");
+            try {
+                double val = Double.parseDouble(raw);
+                if (val >= 0.5 && val < 5000) { sum += val; count++; }
+            } catch (NumberFormatException ignored) {}
+        }
+
+        if (count < 3) return null; // pas assez de lignes extraites pour être fiable
+
+        double expectedNet = brut - sum;
+        double ecart = Math.abs(expectedNet - net);
+
+        if (ecart > 50) {
+            return AnalysisResult.Check.builder()
+                .category("Calculs")
+                .label("Somme des cotisations")
+                .status("FAILED")
+                .detail(String.format(
+                    "Brut (%.2f€) − cotisations salarié (%.2f€, %d lignes) = %.2f€ ≠ Net (%.2f€) — écart de %.2f€",
+                    brut, sum, count, expectedNet, net, ecart))
+                .build();
+        } else if (ecart > 20) {
+            return AnalysisResult.Check.builder()
+                .category("Calculs")
+                .label("Somme des cotisations")
+                .status("WARNING")
+                .detail(String.format(
+                    "Brut − cotisations salarié (%.2f€, %d lignes) = %.2f€, Net = %.2f€ — écart %.2f€ (possible prime ou arrondi)",
+                    sum, count, expectedNet, net, ecart))
+                .build();
+        }
+        return AnalysisResult.Check.builder()
+            .category("Calculs")
+            .label("Somme des cotisations")
+            .status("OK")
+            .detail(String.format(
+                "Brut (%.2f€) − cotisations salarié (%.2f€, %d lignes) ≈ Net (%.2f€) — cohérent (écart %.2f€)",
+                brut, sum, count, net, ecart))
+            .build();
     }
 
     /** Returns the LARGEST plausible salary amount (100–200 000) found in a single line. */

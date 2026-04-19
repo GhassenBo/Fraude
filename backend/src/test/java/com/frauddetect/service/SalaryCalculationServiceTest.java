@@ -239,4 +239,137 @@ class SalaryCalculationServiceTest {
         AnalysisResult.Check check = findCheck(checks, "Ratio Net/Brut");
         assertThat(check.getStatus()).isEqualTo("OK");
     }
+
+    // ── checkNetBrutRatio (CCN) ───────────────────────────────────────────────
+
+    @Test
+    void checkNetBrutRatio_syntec_withinRange_shouldBeOK() {
+        // Syntec: [0.74, 0.82] — ratio 78% is within range
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(
+            "net a payer\nsiret\ncotisation\nconges payes\nConv. Collective : Syntec",
+            docInfo("4000.00 €", "3120.00 €")); // 78%
+
+        AnalysisResult.Check check = findCheck(checks, "Ratio Net/Brut CCN");
+        assertThat(check.getStatus()).isEqualTo("OK");
+        assertThat(check.getDetail()).contains("Syntec");
+    }
+
+    @Test
+    void checkNetBrutRatio_syntec_belowRange_shouldFail() {
+        // Syntec: [0.74, 0.82] — ratio 70% is below 74%
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(
+            "net a payer\nsiret\ncotisation\nconges payes\nConv. Collective : Syntec",
+            docInfo("4000.00 €", "2800.00 €")); // 70%
+
+        AnalysisResult.Check check = findCheck(checks, "Ratio Net/Brut CCN");
+        assertThat(check.getStatus()).isEqualTo("FAILED");
+        assertThat(check.getDetail()).contains("Syntec");
+    }
+
+    @Test
+    void checkNetBrutRatio_syntec_aboveRange_shouldFail() {
+        // Syntec: [0.74, 0.82] — ratio 85% is above 82%
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(
+            "net a payer\nsiret\ncotisation\nconges payes\nConv. Collective : Syntec",
+            docInfo("4000.00 €", "3400.00 €")); // 85%
+
+        AnalysisResult.Check check = findCheck(checks, "Ratio Net/Brut CCN");
+        assertThat(check.getStatus()).isEqualTo("FAILED");
+    }
+
+    @Test
+    void checkNetBrutRatio_metallurgie_withinRange_shouldBeOK() {
+        // Métallurgie: [0.72, 0.80] — ratio 76%
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(
+            "net a payer\nsiret\ncotisation\nconges payes\nConvention Metallurgie",
+            docInfo("3000.00 €", "2280.00 €")); // 76%
+
+        AnalysisResult.Check check = findCheck(checks, "Ratio Net/Brut CCN");
+        assertThat(check.getStatus()).isEqualTo("OK");
+        assertThat(check.getDetail()).contains("Métallurgie");
+    }
+
+    @Test
+    void checkNetBrutRatio_default_withinRange_shouldBeOK() {
+        // Default: [0.70, 0.83] — ratio 75%
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(
+            "net a payer\nsiret\ncotisation\nconges payes\nconvention collective",
+            docInfo("3000.00 €", "2250.00 €")); // 75%
+
+        AnalysisResult.Check check = findCheck(checks, "Ratio Net/Brut CCN");
+        assertThat(check.getStatus()).isEqualTo("OK");
+        assertThat(check.getDetail()).contains("standard");
+    }
+
+    @Test
+    void checkNetBrutRatio_missingValues_returnsNoCheck() {
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(
+            "aucun montant ici", null);
+
+        boolean hasRatioCcn = checks.stream()
+            .anyMatch(c -> "Ratio Net/Brut CCN".equals(c.getLabel()));
+        assertThat(hasRatioCcn).isFalse();
+    }
+
+    // ── checkCotisationsSum ───────────────────────────────────────────────────
+
+    private static final String COTIS_TEXT_COHERENT =
+        "Assurance maladie 6,70 % 3000,00 201,00\n" +
+        "Vieillesse deplafonnee 0,40 % 3000,00 12,00\n" +
+        "Vieillesse plafonnee 6,90 % 3000,00 207,00\n" +
+        "Retraite complementaire 4,72 % 3000,00 141,60\n" +
+        "CSG deductible 6,80 % 2907,00 197,68\n" +
+        // sum = 201+12+207+141.60+197.68 = 759,28
+        // net = 3000 - 759.28 = 2240.72
+        "net a payer\nsiret\nconges payes\nconvention collective";
+
+    @Test
+    void checkCotisationsSum_coherent_shouldBeOK() {
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(
+            COTIS_TEXT_COHERENT,
+            docInfo("3000.00 €", "2240.72 €"));
+
+        AnalysisResult.Check check = findCheck(checks, "Somme des cotisations");
+        assertThat(check.getStatus()).isEqualTo("OK");
+        assertThat(check.getDetail()).contains("cohérent");
+    }
+
+    @Test
+    void checkCotisationsSum_bigGap_shouldFail() {
+        // Same cotisations sum ≈ 759€, but net declared as 1500 → gap > 50€
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(
+            COTIS_TEXT_COHERENT,
+            docInfo("3000.00 €", "1500.00 €"));
+
+        AnalysisResult.Check check = findCheck(checks, "Somme des cotisations");
+        assertThat(check.getStatus()).isEqualTo("FAILED");
+        assertThat(check.getDetail()).contains("≠ Net");
+    }
+
+    @Test
+    void checkCotisationsSum_smallGap_shouldWarn() {
+        // net = 2265 → gap = |2240.72 - 2265| ≈ 24€ → between 20 and 50
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(
+            COTIS_TEXT_COHERENT,
+            docInfo("3000.00 €", "2265.00 €"));
+
+        AnalysisResult.Check check = findCheck(checks, "Somme des cotisations");
+        assertThat(check.getStatus()).isEqualTo("WARNING");
+        assertThat(check.getDetail()).contains("arrondi");
+    }
+
+    @Test
+    void checkCotisationsSum_fewerThan3Lines_skipped() {
+        // Only 2 cotisation lines — check should be skipped (not enough data)
+        String text = "Assurance maladie 6,70 % 3000,00 201,00\n" +
+            "Vieillesse 0,40 % 3000,00 12,00\n" +
+            "net a payer\nsiret\nconges payes\nconvention collective";
+
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(
+            text, docInfo("3000.00 €", "2787.00 €"));
+
+        boolean hasCotisSum = checks.stream()
+            .anyMatch(c -> "Somme des cotisations".equals(c.getLabel()));
+        assertThat(hasCotisSum).isFalse();
+    }
 }
