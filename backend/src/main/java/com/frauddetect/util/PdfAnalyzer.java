@@ -29,7 +29,8 @@ public class PdfAnalyzer {
     public record PdfAnalysisData(
         String rawText,
         AnalysisResult.DocumentInfo documentInfo,
-        List<AnalysisResult.Check> metadataChecks
+        List<AnalysisResult.Check> metadataChecks,
+        byte[] pdfBytes
     ) {}
 
     public PdfAnalysisData analyze(InputStream inputStream) throws Exception {
@@ -112,7 +113,7 @@ public class PdfAnalyzer {
             // Extract document info from text
             AnalysisResult.DocumentInfo docInfo = extractDocumentInfo(rawText, producer, creationDate, modDate, wasModified, pageCount);
 
-            return new PdfAnalysisData(rawText, docInfo, checks);
+            return new PdfAnalysisData(rawText, docInfo, checks, bytes);
         }
     }
 

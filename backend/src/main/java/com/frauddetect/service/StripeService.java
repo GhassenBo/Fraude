@@ -77,14 +77,14 @@ public class StripeService {
     }
 
     public String createPortalSession(User user) throws StripeException {
-        com.stripe.param.BillingPortalSessionCreateParams params =
-            com.stripe.param.BillingPortalSessionCreateParams.builder()
+        com.stripe.param.billingportal.SessionCreateParams params =
+            com.stripe.param.billingportal.SessionCreateParams.builder()
                 .setCustomer(user.getStripeCustomerId())
                 .setReturnUrl(baseUrl + "/dashboard")
                 .build();
 
-        com.stripe.model.BillingPortalSession portalSession =
-            com.stripe.model.BillingPortalSession.create(params);
+        com.stripe.model.billingportal.Session portalSession =
+            com.stripe.model.billingportal.Session.create(params);
 
         return portalSession.getUrl();
     }

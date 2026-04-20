@@ -47,6 +47,10 @@ public class User {
         return plan == Plan.PRO || documentsUsed < freeLimit;
     }
 
+    public boolean canAnalyzeMultiple(int count, int freeLimit) {
+        return plan == Plan.PRO || (documentsUsed + count) <= freeLimit;
+    }
+
     public int remainingFreeDocuments(int freeLimit) {
         if (plan == Plan.PRO) return -1; // unlimited
         return Math.max(0, freeLimit - documentsUsed);

@@ -14,6 +14,7 @@ public class AnalysisResult {
     private DocumentInfo documentInfo;
     private int remainingDocuments;
     private boolean isPro;
+    private boolean aiEnabled;
 
     @Data
     @Builder
