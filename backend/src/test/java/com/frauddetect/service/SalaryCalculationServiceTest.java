@@ -270,7 +270,7 @@ class SalaryCalculationServiceTest {
 
         AnalysisResult.Check check = findCheck(checks, "Ratio Net/Brut CCN");
         assertThat(check.getStatus()).isEqualTo("OK");
-        assertThat(check.getDetail()).contains("Net avant impôt");
+        assertThat(check.getDetail()).contains("Net avant PAS");
         assertThat(check.getDetail()).contains("Syntec");
     }
 
@@ -283,7 +283,7 @@ class SalaryCalculationServiceTest {
 
         AnalysisResult.Check check = findCheck(checks, "Ratio Net/Brut CCN");
         assertThat(check.getStatus()).isEqualTo("OK");
-        assertThat(check.getDetail()).contains("Net à payer");
+        assertThat(check.getDetail()).contains("Net avant PAS");
     }
 
     @Test
@@ -394,13 +394,13 @@ class SalaryCalculationServiceTest {
 
     @Test
     void checkPAS_coherent_shouldBeOK() {
-        // net avant PAS = 3 036,60 ; PAS = 170,88 ; net final = 3036.60 - 170.88 = 2865.72
+        // Vision returns net avant PAS = 3036.60 ; PAS = 170.88 ; net final après PAS = 2865.72
         String text = "net a payer avant impot 3 036,60\n" +
             "prelevement a la source 170,88\n" +
-            "net a payer\nsiret\ncotisation\nconges payes\nconvention collective";
+            "net a payer 2 865,72\nsiret\ncotisation\nconges payes\nconvention collective";
 
         List<AnalysisResult.Check> checks = service.analyzeCalculations(
-            text, docInfo("4000.00 €", "2865.72 €"), true);
+            text, docInfo("4000.00 €", "3036.60 €"), true);
 
         AnalysisResult.Check check = findCheck(checks, "Prélèvement à la source");
         assertThat(check.getStatus()).isEqualTo("OK");
@@ -410,14 +410,14 @@ class SalaryCalculationServiceTest {
 
     @Test
     void checkPAS_netFinalFalsified_shouldWarn() {
-        // net avant PAS = 3 036,60 ; PAS = 170,88 → expected net = 2865.72
-        // net déclaré = 3 507,16 (falsifié +641€)
+        // Vision returns net avant PAS = 3036.60 ; PAS = 170.88 → expected = 2865.72
+        // but net final in doc = 3507.16 (falsifié +641€)
         String text = "net a payer avant impot 3 036,60\n" +
             "prelevement a la source 170,88\n" +
-            "net a payer\nsiret\ncotisation\nconges payes\nconvention collective";
+            "net a payer 3 507,16\nsiret\ncotisation\nconges payes\nconvention collective";
 
         List<AnalysisResult.Check> checks = service.analyzeCalculations(
-            text, docInfo("4000.00 €", "3507.16 €"), true);
+            text, docInfo("4000.00 €", "3036.60 €"), true);
 
         AnalysisResult.Check check = findCheck(checks, "Prélèvement à la source");
         assertThat(check.getStatus()).isEqualTo("WARNING");

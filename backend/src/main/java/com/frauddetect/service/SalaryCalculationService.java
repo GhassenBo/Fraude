@@ -185,8 +185,12 @@ public class SalaryCalculationService {
         // Check 4: Required fields present
         checks.addAll(checkRequiredFields(text));
 
-        // Check 5: Ratio Net/Brut par CCN — utilise le net avant impôt (avant PAS)
-        AnalysisResult.Check ratioCcn = checkNetBrutRatio(salaireBrut, netAvantImpot, salaireNet, text);
+        // Check 5: Ratio Net/Brut par CCN
+        // Quand Vision est actif, on utilise son net (= net avant PAS, valeur fiable).
+        // Sinon, fallback sur le regex netAvantImpot, puis sur netFinal si rien d'autre.
+        Double netForCcn = (visionEnabled && salaireNet != null) ? salaireNet
+            : (netAvantImpot != null ? netAvantImpot : salaireNet);
+        AnalysisResult.Check ratioCcn = checkNetBrutRatio(salaireBrut, netForCcn, text);
         if (ratioCcn != null) checks.add(ratioCcn);
 
         // Check 6: Somme individuelle des lignes de cotisations
@@ -194,7 +198,12 @@ public class SalaryCalculationService {
         if (cotisSum != null) checks.add(cotisSum);
 
         // Check 7: Cohérence prélèvement à la source
-        AnalysisResult.Check pasCheck = checkPAS(netAvantImpot, montantPAS, salaireNet);
+        // Équation : net_avant_PAS − PAS = net_final_après_PAS.
+        // Source net avant PAS : Vision en priorité (fiable), regex en fallback.
+        // Source net final : regex sur les lignes "net à payer" sans "avant" (valeur après déduction).
+        Double netAvantPasForCheck = (visionEnabled && salaireNet != null) ? salaireNet : netAvantImpot;
+        Double netFinalApresPas = extractNetFinalApresPas(lines);
+        AnalysisResult.Check pasCheck = checkPAS(netAvantPasForCheck, montantPAS, netFinalApresPas);
         if (pasCheck != null) checks.add(pasCheck);
 
         return checks;
@@ -317,18 +326,14 @@ public class SalaryCalculationService {
 
     /**
      * Vérifie que le ratio Net/Brut est dans la plage attendue pour la CCN détectée.
-     * Utilise le net avant impôt (avant PAS) en priorité : le PAS varie de 0% à 45%
-     * selon le taux personnel de l'employé et fausserait le ratio attendu.
-     * Fall-back sur le net à payer final si net avant impôt non disponible (bulletin pré-2019).
+     * Le net passé est soit la valeur Vision (net avant PAS, prioritaire), soit le
+     * regex netAvantImpot. Le PAS personnel ne doit pas fausser le ratio CCN.
      * Plages basées sur les charges salariales françaises 2024 (régime général).
      */
-    private AnalysisResult.Check checkNetBrutRatio(Double brut, Double netAvantImpot,
-                                                    Double netFinal, String text) {
-        if (brut == null || brut <= 0) return null;
-        Double net = netAvantImpot != null ? netAvantImpot : netFinal;
-        if (net == null) return null;
+    private AnalysisResult.Check checkNetBrutRatio(Double brut, Double net, String text) {
+        if (brut == null || brut <= 0 || net == null) return null;
 
-        String netLabel = netAvantImpot != null ? "Net avant impôt" : "Net à payer";
+        String netLabel = "Net avant PAS";
 
         String normalized = normalizeDiacritics(text);
         double min, max;
@@ -467,6 +472,22 @@ public class SalaryCalculationService {
                 "Brut (%.2f€) − cotisations salarié (%.2f€, %d lignes) ≈ Net (%.2f€) — cohérent (écart %.2f€)",
                 brut, sum, count, net, ecart))
             .build();
+    }
+
+    /**
+     * Extrait le net final APRÈS prélèvement à la source.
+     * Cible les lignes contenant "net a payer" mais PAS "avant"
+     * (pour exclure "net a payer avant impôt sur le revenu").
+     */
+    private Double extractNetFinalApresPas(String[] lines) {
+        for (String line : lines) {
+            String norm = normalizeDiacritics(line);
+            if (norm.contains("net a payer") && !norm.contains("avant")) {
+                Double val = largestAmountInLine(line);
+                if (val != null) return val;
+            }
+        }
+        return null;
     }
 
     /**
