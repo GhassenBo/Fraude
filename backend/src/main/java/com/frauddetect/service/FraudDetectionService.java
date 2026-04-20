@@ -59,7 +59,8 @@ public class FraudDetectionService {
         PdfAnalyzer.PdfAnalysisData pdfData = pdfAnalyzer.analyze(file.getInputStream());
         allChecks.addAll(pdfData.metadataChecks());
         allChecks.addAll(siretService.verify(pdfData.documentInfo().getSiret(), pdfData.documentInfo().getEmployeur()));
-        allChecks.addAll(salaryService.analyzeCalculations(pdfData.rawText(), pdfData.documentInfo()));
+        allChecks.addAll(salaryService.analyzeCalculations(pdfData.rawText(), pdfData.documentInfo(),
+            claudeVisionService.isEnabled()));
 
         // AI analysis (GPT-4) — optional, runs only if API key is configured
         List<AnalysisResult.Check> aiChecks = aiAnalysisService.analyze(pdfData.rawText(), pdfData.documentInfo());

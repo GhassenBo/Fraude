@@ -19,24 +19,32 @@ public class SalaryCalculationService {
     private static final double CHARGES_SALARIALES_MAX = 0.30;
 
     public List<AnalysisResult.Check> analyzeCalculations(String text, AnalysisResult.DocumentInfo docInfo) {
+        return analyzeCalculations(text, docInfo, false);
+    }
+
+    /**
+     * @param visionEnabled true si ClaudeVisionService est actif pour cette analyse.
+     *                      Contrôle si le check Ratio Net/Brut peut s'exécuter.
+     */
+    public List<AnalysisResult.Check> analyzeCalculations(String text, AnalysisResult.DocumentInfo docInfo,
+                                                           boolean visionEnabled) {
         List<AnalysisResult.Check> checks = new ArrayList<>();
         String[] lines = text.split("\\r?\\n");
 
-        // Prefer Claude Vision values from docInfo (already validated, no column confusion).
-        // Fall back to regex extraction only when Vision values are absent.
+        // Salaire brut : Vision en priorité, regex en fallback.
         Double salaireBrut = parseDocInfoAmount(docInfo != null ? docInfo.getSalaireBrut() : null);
-        Double salaireNet  = parseDocInfoAmount(docInfo != null ? docInfo.getSalaireNet()  : null);
-
         if (salaireBrut == null) {
             salaireBrut = extractAmountNearLabel(lines,
                 "salaire brut", "remuneration brute", "remuneration brut",
                 "total remuneration brute", "total remuneration brut",
                 "brut total", "total brut", "brut fiscal", "brut :");
         }
-        if (salaireNet == null) {
-            salaireNet = extractAmountNearLabel(lines,
-                "net a payer", "net paye", "net verse");
-        }
+
+        // Net à payer : UNIQUEMENT Vision — la regex génère trop de faux positifs
+        // (confusion avec net social, net imposable, net avant PAS).
+        Double salaireNet = visionEnabled
+            ? parseDocInfoAmount(docInfo != null ? docInfo.getSalaireNet() : null)
+            : null;
 
         Double totalCotisations = extractAmountNearLabel(lines,
             "total cotisations salariales", "total retenues salariales",
@@ -79,8 +87,15 @@ public class SalaryCalculationService {
                 .build());
         }
 
-        // Check 1: Brut vs Net ratio
-        if (salaireBrut != null && salaireNet != null && salaireBrut > 0) {
+        // Check 1: Brut vs Net ratio — nécessite la valeur Vision (pas de regex fallback)
+        if (!visionEnabled) {
+            checks.add(AnalysisResult.Check.builder()
+                .category("Calculs")
+                .label("Ratio Net/Brut")
+                .status("WARNING")
+                .detail("Vérification ratio Net/Brut nécessite l'analyse Vision IA")
+                .build());
+        } else if (salaireBrut != null && salaireNet != null && salaireBrut > 0) {
             double ratio = salaireNet / salaireBrut;
             if (ratio > 1.0) {
                 checks.add(AnalysisResult.Check.builder()
@@ -111,12 +126,12 @@ public class SalaryCalculationService {
                     .detail(String.format("Ratio Net/Brut de %.0f%% — cohérent avec les cotisations françaises", ratio * 100))
                     .build());
             }
-        } else if (salaireBrut == null || salaireNet == null) {
+        } else {
             checks.add(AnalysisResult.Check.builder()
                 .category("Calculs")
                 .label("Ratio Net/Brut")
                 .status("WARNING")
-                .detail("Impossible d'extraire le salaire brut et/ou net du document")
+                .detail("Impossible d'extraire le salaire brut et/ou net via Vision")
                 .build());
         }
 

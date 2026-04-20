@@ -171,10 +171,12 @@ public class ClaudeVisionService {
                 Ce montant est typiquement entre 1 000 € et 15 000 €. \
                 IGNORE les colonnes "Taux", "Base", "Unité", "Parts patronales", "Parts salariales" — \
                 ce sont des taux et bases de calcul, pas des montants de salaire total.
-                - NET À PAYER : c'est le montant FINAL versé à l'employé, souvent dans un encadré \
-                séparé en bas du bulletin. Cherche "NET A PAYER", "Net à payer", "Net versé". \
-                C'est le PLUS GRAND montant visible dans cet encadré NET A PAYER. \
-                IGNORE "Net fiscal", "Net imposable" et "Montant net social" — ce sont des montants différents.
+                - NET À PAYER (salaireNet) : c'est le "net à payer AVANT prélèvement à la source". \
+                C'est le montant dans l'encadré qui PRÉCÈDE la ligne du prélèvement à la source (PAS). \
+                Cherche "NET A PAYER AVANT PRELEVEMENT A LA SOURCE", "Net à payer avant impôt sur le revenu". \
+                IGNORE absolument : "Montant net social", "Net imposable", "Net fiscal", \
+                et le net APRÈS prélèvement à la source (montant final après déduction du PAS). \
+                salaireNet = net à payer AVANT prélèvement à la source.
                 - PÉRIODE : si les dates sont numériques (ex: 01-07-2021 au 31-07-2021), \
                 convertis en "Juillet 2021".
 
