@@ -32,6 +32,7 @@ services:
       db:
         condition: service_healthy
     environment:
+      SPRING_PROFILES_ACTIVE: prod
       DATABASE_URL: jdbc:postgresql://db:5432/frauddetect
       DATABASE_USER: ${DB_USER:-frauddetect}
       DATABASE_PASSWORD: ${DB_PASSWORD}
