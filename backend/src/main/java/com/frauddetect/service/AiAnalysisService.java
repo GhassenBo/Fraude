@@ -64,8 +64,8 @@ public class AiAnalysisService {
             - Employeur    : %s
             - Employé      : %s
             - Période      : %s
-            - Salaire brut : %s
-            - Net à payer  : %s
+            - Salaire brut           : %s
+            - Net avant PAS (avant prélèvement à la source) : %s
 
             Texte brut du bulletin :
             ---

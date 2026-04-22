@@ -144,10 +144,12 @@ class SalaryCalculationServiceTest {
 
     @Test
     void netSocialCheck_netPayerAboveNetSocial_shouldFail() {
-        // Use docInfo to set salaireNet=2500 directly (avoids regex window overlapping netSocial line).
-        // Text has netSocial=1500 — 2500 > 1500+50 → FAILED.
+        // netFinalApresPas=2500 (from "net a payer 2 500,00") > netSocial=1500+50 → FAILED.
+        // 5 padding lines separate the two labels so extractAmountNearLabel (window ±4)
+        // doesn't pick up the "net a payer" amount when extracting netSocial.
         String text = "montant net social 1500.00\n"
-            + "net a payer\n"
+            + "pad\npad\npad\npad\npad\n"
+            + "net a payer 2 500,00\n"
             + "siret\ncotisation\nconges payes\nconvention collective";
 
         List<AnalysisResult.Check> checks = service.analyzeCalculations(

@@ -71,19 +71,21 @@ public class SalaryCalculationService {
             "prelevement a la source",
             "retenue a la source");
 
-        // Check 0: Net social vs Net à payer cross-validation
-        // Invariant comptable : Net à payer = Net social − Impôt ≤ Net social (toujours)
-        // On évite d'extraire l'impôt (labels ambigus, confusions avec bases CSG)
-        // et on vérifie simplement que Net à payer ne dépasse pas Net social.
-        if (salaireNet != null && netSocial != null && salaireNet > netSocial + 50) {
+        // Check 0: Net social vs net final après PAS cross-validation.
+        // Vision retourne le net AVANT PAS (> net social = normal).
+        // On utilise le net FINAL (après PAS) extrait par regex pour cette comparaison.
+        // Invariant : net final après PAS ≤ net social (le PAS réduit toujours le net).
+        Double netFinalForSocialCheck = extractNetFinalApresPas(lines);
+        if (netFinalForSocialCheck != null && netSocial != null
+                && netFinalForSocialCheck > netSocial + 50) {
             checks.add(AnalysisResult.Check.builder()
                 .category("Calculs")
                 .label("Cohérence Net social / Net à payer")
                 .status("FAILED")
                 .detail(String.format(
-                    "Net à payer (%.2f€) supérieur au Net social (%.2f€) — impossible,"
+                    "Net à payer final (%.2f€) supérieur au Net social (%.2f€) — impossible,"
                         + " le net à payer a probablement été falsifié",
-                    salaireNet, netSocial))
+                    netFinalForSocialCheck, netSocial))
                 .build());
         }
 
