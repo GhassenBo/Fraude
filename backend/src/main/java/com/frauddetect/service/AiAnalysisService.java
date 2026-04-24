@@ -73,12 +73,22 @@ public class AiAnalysisService {
             ---
 
             Analyse ce document et détecte toute anomalie, incohérence ou signe de falsification.
-            Vérifie notamment :
+
+            IMPORTANT — éléments NORMAUX en paie française, ne jamais signaler comme suspect :
+            - "Réintégration sociale" ou "Réintégration patronale" : écriture comptable standard
+              qui réintègre dans le net certains avantages patronaux (voiture, tickets restaurant…)
+            - "ADESATT" : contribution patronale légale pour les entreprises de travail temporaire
+            - "Autres contributions dues par l'employeur" : ligne récapitulative standard
+            - "Contribution patronale de prévoyance", "Mutuelle", "Prévoyance" : obligatoires
+            - Absence de ligne "Congés payés" pour un cadre au forfait : normal
+            - Montant net avant PAS > 88%% du brut : possible si réintégrations ou primes
+
+            Vérifie uniquement :
             - La cohérence entre l'intitulé du poste et le niveau de salaire
-            - Les libellés de cotisations inhabituels ou absents
+            - Les libellés de cotisations manifestement fictifs ou incohérents
             - La cohérence des dates (période, ancienneté, congés)
-            - La présence de formulations copiées-collées ou génériques
-            - Tout autre élément suspect
+            - La présence de formulations copiées-collées ou génériques suspectes
+            - Toute incohérence mathématique flagrante (> 100€ d'écart inexpliqué)
 
             Réponds UNIQUEMENT en JSON valide avec ce format exact (5 findings maximum) :
             {

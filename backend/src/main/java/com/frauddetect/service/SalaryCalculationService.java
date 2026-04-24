@@ -106,7 +106,7 @@ public class SalaryCalculationService {
                     .status("FAILED")
                     .detail(String.format("Net (%.2f€) supérieur au Brut (%.2f€) — impossible", salaireNet, salaireBrut))
                     .build());
-            } else if (ratio > 0.90) {
+            } else if (ratio > 0.93) {
                 checks.add(AnalysisResult.Check.builder()
                     .category("Calculs")
                     .label("Ratio Net/Brut")
