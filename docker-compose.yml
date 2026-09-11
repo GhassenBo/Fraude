@@ -63,7 +63,7 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - /etc/letsencrypt:/etc/letsencrypt:ro  # Let's Encrypt certs (symlinks resolve correctly)
+      - ./ssl:/etc/nginx/ssl:ro  # SSL certs (copy actual files with: cp -L /etc/letsencrypt/live/<domain>/*.pem ./ssl/)
     networks:
       - internal
 
