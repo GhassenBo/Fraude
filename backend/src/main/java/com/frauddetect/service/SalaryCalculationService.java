@@ -63,11 +63,19 @@ public class SalaryCalculationService {
             "prelevement a la source",
             "retenue a la source");
 
-        // Check 0: Net social vs Net à payer cross-validation
-        // Invariant comptable : Net à payer = Net social − Impôt ≤ Net social (toujours)
-        // On évite d'extraire l'impôt (labels ambigus, confusions avec bases CSG)
-        // et on vérifie simplement que Net à payer ne dépasse pas Net social.
-        if (salaireNet != null && netSocial != null && salaireNet > netSocial + 50) {
+        // Check 0: Net social vs Net à payer final cross-validation.
+        // Invariant : Net à payer final ≤ Net social (toujours).
+        // When "net avant impôt" exists in the text, Vision's salaireNet IS the net avant PAS
+        // (not the net final), so we extract the net final from the text independently to avoid
+        // false positives (réintégrations can make net avant PAS > net social legally).
+        Double netFinalForSocialCheck;
+        if (netAvantImpot != null) {
+            netFinalForSocialCheck = extractNetFinalApresPas(lines);
+            if (netFinalForSocialCheck == null) netFinalForSocialCheck = salaireNet;
+        } else {
+            netFinalForSocialCheck = salaireNet;
+        }
+        if (netFinalForSocialCheck != null && netSocial != null && netFinalForSocialCheck > netSocial + 50) {
             checks.add(AnalysisResult.Check.builder()
                 .category("Calculs")
                 .label("Cohérence Net social / Net à payer")
@@ -75,7 +83,7 @@ public class SalaryCalculationService {
                 .detail(String.format(
                     "Net à payer (%.2f€) supérieur au Net social (%.2f€) — impossible,"
                         + " le net à payer a probablement été falsifié",
-                    salaireNet, netSocial))
+                    netFinalForSocialCheck, netSocial))
                 .build());
         }
 
@@ -89,7 +97,7 @@ public class SalaryCalculationService {
                     .status("FAILED")
                     .detail(String.format("Net (%.2f€) supérieur au Brut (%.2f€) — impossible", salaireNet, salaireBrut))
                     .build());
-            } else if (ratio > 0.90) {
+            } else if (ratio > 0.93) {
                 checks.add(AnalysisResult.Check.builder()
                     .category("Calculs")
                     .label("Ratio Net/Brut")
@@ -452,6 +460,27 @@ public class SalaryCalculationService {
                 "Brut (%.2f€) − cotisations salarié (%.2f€, %d lignes) ≈ Net (%.2f€) — cohérent (écart %.2f€)",
                 brut, sum, count, net, ecart))
             .build();
+    }
+
+    /**
+     * Extracts the net final après PAS ("net à payer" excluding "net avant impôt" lines).
+     * Used in Check 0 to avoid false positives when Vision's salaireNet is the net avant PAS.
+     */
+    private Double extractNetFinalApresPas(String[] lines) {
+        for (int i = 0; i < lines.length; i++) {
+            String norm = normalizeDiacritics(lines[i]);
+            if (norm.contains("net a payer")
+                    && !norm.contains("avant impot")
+                    && !norm.contains("avant prelevement")) {
+                Double val = largestAmountInLine(lines[i]);
+                if (val != null) return val;
+                if (i + 1 < lines.length) {
+                    val = largestAmountInLine(lines[i + 1]);
+                    if (val != null) return val;
+                }
+            }
+        }
+        return null;
     }
 
     /**

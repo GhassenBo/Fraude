@@ -17,7 +17,7 @@ import java.util.List;
 public class AiAnalysisService {
 
     @Value("${openai.api.key:}")
-    private String apiKey;
+    private String apiKey; // defaults to "" so AI is silently disabled when key absent
 
     @Value("${openai.model:gpt-4o}")
     private String model;
@@ -65,7 +65,7 @@ public class AiAnalysisService {
             - Employé      : %s
             - Période      : %s
             - Salaire brut : %s
-            - Net à payer  : %s
+            - Net avant PAS (avant prélèvement à la source) : %s
 
             Texte brut du bulletin :
             ---
@@ -73,6 +73,15 @@ public class AiAnalysisService {
             ---
 
             Analyse ce document et détecte toute anomalie, incohérence ou signe de falsification.
+
+            IMPORTANT — éléments NORMAUX en paie française, ne jamais signaler comme suspect :
+            - "Réintégration sociale" ou "Réintégration patronale" : écriture comptable standard
+            - "ADESATT" : contribution patronale légale
+            - "Autres contributions dues par l'employeur" : ligne récapitulative standard
+            - "Contribution patronale de prévoyance", "Mutuelle", "Prévoyance" : obligatoires
+            - Absence de ligne "Congés payés" pour un cadre au forfait : normal
+            - Montant net avant PAS > 88% du brut : possible si réintégrations ou primes
+
             Vérifie notamment :
             - La cohérence entre l'intitulé du poste et le niveau de salaire
             - Les libellés de cotisations inhabituels ou absents

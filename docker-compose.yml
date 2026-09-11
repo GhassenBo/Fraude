@@ -40,6 +40,8 @@ services:
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
       STRIPE_PRICE_ID: ${STRIPE_PRICE_ID}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost}
+      SPRING_PROFILES_ACTIVE: prod
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
     networks:
       - internal
     healthcheck:
