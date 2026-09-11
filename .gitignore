@@ -25,6 +25,9 @@ backups/
 # ── SSL certificates ──
 ssl/
 
+# ── Claude Code ──
+.claude/
+
 # ── IDE ──
 .idea/
 *.iml
