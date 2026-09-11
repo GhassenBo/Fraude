@@ -63,7 +63,7 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./ssl:/etc/nginx/ssl:ro          # Mount SSL certs for HTTPS
+      - /etc/letsencrypt:/etc/letsencrypt:ro  # Let's Encrypt certs (symlinks resolve correctly)
     networks:
       - internal
 
