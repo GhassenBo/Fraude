@@ -19,24 +19,32 @@ public class SalaryCalculationService {
     private static final double CHARGES_SALARIALES_MAX = 0.30;
 
     public List<AnalysisResult.Check> analyzeCalculations(String text, AnalysisResult.DocumentInfo docInfo) {
+        return analyzeCalculations(text, docInfo, false);
+    }
+
+    /**
+     * @param visionEnabled true si ClaudeVisionService est actif pour cette analyse.
+     *                      Contrôle si le check Ratio Net/Brut peut s'exécuter.
+     */
+    public List<AnalysisResult.Check> analyzeCalculations(String text, AnalysisResult.DocumentInfo docInfo,
+                                                           boolean visionEnabled) {
         List<AnalysisResult.Check> checks = new ArrayList<>();
         String[] lines = text.split("\\r?\\n");
 
-        // Prefer Claude Vision values from docInfo (already validated, no column confusion).
-        // Fall back to regex extraction only when Vision values are absent.
+        // Salaire brut : Vision en priorité, regex en fallback.
         Double salaireBrut = parseDocInfoAmount(docInfo != null ? docInfo.getSalaireBrut() : null);
-        Double salaireNet  = parseDocInfoAmount(docInfo != null ? docInfo.getSalaireNet()  : null);
-
         if (salaireBrut == null) {
             salaireBrut = extractAmountNearLabel(lines,
                 "salaire brut", "remuneration brute", "remuneration brut",
                 "total remuneration brute", "total remuneration brut",
                 "brut total", "total brut", "brut fiscal", "brut :");
         }
-        if (salaireNet == null) {
-            salaireNet = extractAmountNearLabel(lines,
-                "net a payer", "net paye", "net verse");
-        }
+
+        // Net à payer : UNIQUEMENT Vision — la regex génère trop de faux positifs
+        // (confusion avec net social, net imposable, net avant PAS).
+        Double salaireNet = visionEnabled
+            ? parseDocInfoAmount(docInfo != null ? docInfo.getSalaireNet() : null)
+            : null;
 
         Double totalCotisations = extractAmountNearLabel(lines,
             "total cotisations salariales", "total retenues salariales",
@@ -63,19 +71,11 @@ public class SalaryCalculationService {
             "prelevement a la source",
             "retenue a la source");
 
-        // Check 0: Net social vs Net à payer final cross-validation.
-        // Invariant : Net à payer final ≤ Net social (toujours).
-        // When "net avant impôt" exists in the text, Vision's salaireNet IS the net avant PAS
-        // (not the net final), so we extract the net final from the text independently to avoid
-        // false positives (réintégrations can make net avant PAS > net social legally).
-        Double netFinalForSocialCheck;
-        if (netAvantImpot != null) {
-            netFinalForSocialCheck = extractNetFinalApresPas(lines);
-            if (netFinalForSocialCheck == null) netFinalForSocialCheck = salaireNet;
-        } else {
-            netFinalForSocialCheck = salaireNet;
-        }
-        if (netFinalForSocialCheck != null && netSocial != null && netFinalForSocialCheck > netSocial + 50) {
+        // Check 0: Net social vs Net à payer cross-validation
+        // Invariant comptable : Net à payer = Net social − Impôt ≤ Net social (toujours)
+        // On évite d'extraire l'impôt (labels ambigus, confusions avec bases CSG)
+        // et on vérifie simplement que Net à payer ne dépasse pas Net social.
+        if (salaireNet != null && netSocial != null && salaireNet > netSocial + 50) {
             checks.add(AnalysisResult.Check.builder()
                 .category("Calculs")
                 .label("Cohérence Net social / Net à payer")
@@ -83,12 +83,19 @@ public class SalaryCalculationService {
                 .detail(String.format(
                     "Net à payer (%.2f€) supérieur au Net social (%.2f€) — impossible,"
                         + " le net à payer a probablement été falsifié",
-                    netFinalForSocialCheck, netSocial))
+                    salaireNet, netSocial))
                 .build());
         }
 
-        // Check 1: Brut vs Net ratio
-        if (salaireBrut != null && salaireNet != null && salaireBrut > 0) {
+        // Check 1: Brut vs Net ratio — nécessite la valeur Vision (pas de regex fallback)
+        if (!visionEnabled) {
+            checks.add(AnalysisResult.Check.builder()
+                .category("Calculs")
+                .label("Ratio Net/Brut")
+                .status("WARNING")
+                .detail("Vérification ratio Net/Brut nécessite l'analyse Vision IA")
+                .build());
+        } else if (salaireBrut != null && salaireNet != null && salaireBrut > 0) {
             double ratio = salaireNet / salaireBrut;
             if (ratio > 1.0) {
                 checks.add(AnalysisResult.Check.builder()
@@ -101,8 +108,8 @@ public class SalaryCalculationService {
                 checks.add(AnalysisResult.Check.builder()
                     .category("Calculs")
                     .label("Ratio Net/Brut")
-                    .status("FAILED")
-                    .detail(String.format("Ratio Net/Brut de %.0f%% — trop élevé, les cotisations semblent manquantes", ratio * 100))
+                    .status("WARNING")
+                    .detail(String.format("Ratio Net/Brut de %.0f%% — élevé, vérifier si apprenti, ZFU/ZRR ou exonérations spécifiques", ratio * 100))
                     .build());
             } else if (ratio < 0.60) {
                 checks.add(AnalysisResult.Check.builder()
@@ -119,32 +126,34 @@ public class SalaryCalculationService {
                     .detail(String.format("Ratio Net/Brut de %.0f%% — cohérent avec les cotisations françaises", ratio * 100))
                     .build());
             }
-        } else if (salaireBrut == null || salaireNet == null) {
+        } else {
             checks.add(AnalysisResult.Check.builder()
                 .category("Calculs")
                 .label("Ratio Net/Brut")
                 .status("WARNING")
-                .detail("Impossible d'extraire le salaire brut et/ou net du document")
+                .detail("Impossible d'extraire le salaire brut et/ou net via Vision")
                 .build());
         }
 
         // Check 2: Cotisations coherence
-        if (salaireBrut != null && salaireNet != null && totalCotisations != null) {
-            double expectedDiff = salaireBrut - salaireNet;
+        // Use net avant PAS (before income tax) to avoid counting PAS as a missing cotisation
+        Double netForCotisCheck = netAvantImpot != null ? netAvantImpot : salaireNet;
+        if (salaireBrut != null && netForCotisCheck != null && totalCotisations != null) {
+            double expectedDiff = salaireBrut - netForCotisCheck;
             double tolerance = salaireBrut * 0.05;
             if (Math.abs(expectedDiff - totalCotisations) > tolerance) {
                 checks.add(AnalysisResult.Check.builder()
                     .category("Calculs")
                     .label("Cohérence des cotisations")
-                    .status("FAILED")
-                    .detail(String.format("Écart entre Brut-Net (%.2f€) et cotisations déclarées (%.2f€) — incohérence comptable", expectedDiff, totalCotisations))
+                    .status("WARNING")
+                    .detail(String.format("Écart entre Brut−Net avant PAS (%.2f€) et cotisations (%.2f€) — peut indiquer primes ou avantages non cotisés", expectedDiff, totalCotisations))
                     .build());
             } else {
                 checks.add(AnalysisResult.Check.builder()
                     .category("Calculs")
                     .label("Cohérence des cotisations")
                     .status("OK")
-                    .detail(String.format("Brut - Net = %.2f€, cotisations déclarées = %.2f€ — cohérent", expectedDiff, totalCotisations))
+                    .detail(String.format("Brut − Net avant PAS = %.2f€, cotisations = %.2f€ — cohérent", expectedDiff, totalCotisations))
                     .build());
             }
         }
@@ -155,8 +164,8 @@ public class SalaryCalculationService {
                 checks.add(AnalysisResult.Check.builder()
                     .category("Calculs")
                     .label("Comparaison SMIC")
-                    .status("FAILED")
-                    .detail(String.format("Salaire brut %.2f€ inférieur au SMIC mensuel (%.2f€) — illégal", salaireBrut, SMIC_MENSUEL))
+                    .status("WARNING")
+                    .detail(String.format("Salaire brut %.2f€ inférieur au SMIC mensuel (%.2f€) — vérifier si temps partiel, mois incomplet, apprenti ou stage", salaireBrut, SMIC_MENSUEL))
                     .build());
             } else if (salaireBrut > 50000) {
                 checks.add(AnalysisResult.Check.builder()
@@ -178,8 +187,12 @@ public class SalaryCalculationService {
         // Check 4: Required fields present
         checks.addAll(checkRequiredFields(text));
 
-        // Check 5: Ratio Net/Brut par CCN — utilise le net avant impôt (avant PAS)
-        AnalysisResult.Check ratioCcn = checkNetBrutRatio(salaireBrut, netAvantImpot, salaireNet, text);
+        // Check 5: Ratio Net/Brut par CCN
+        // Quand Vision est actif, on utilise son net (= net avant PAS, valeur fiable).
+        // Sinon, fallback sur le regex netAvantImpot, puis sur netFinal si rien d'autre.
+        Double netForCcn = (visionEnabled && salaireNet != null) ? salaireNet
+            : (netAvantImpot != null ? netAvantImpot : salaireNet);
+        AnalysisResult.Check ratioCcn = checkNetBrutRatio(salaireBrut, netForCcn, text);
         if (ratioCcn != null) checks.add(ratioCcn);
 
         // Check 6: Somme individuelle des lignes de cotisations
@@ -187,7 +200,12 @@ public class SalaryCalculationService {
         if (cotisSum != null) checks.add(cotisSum);
 
         // Check 7: Cohérence prélèvement à la source
-        AnalysisResult.Check pasCheck = checkPAS(netAvantImpot, montantPAS, salaireNet);
+        // Équation : net_avant_PAS − PAS = net_final_après_PAS.
+        // Source net avant PAS : Vision en priorité (fiable), regex en fallback.
+        // Source net final : regex sur les lignes "net à payer" sans "avant" (valeur après déduction).
+        Double netAvantPasForCheck = (visionEnabled && salaireNet != null) ? salaireNet : netAvantImpot;
+        Double netFinalApresPas = extractNetFinalApresPas(lines);
+        AnalysisResult.Check pasCheck = checkPAS(netAvantPasForCheck, montantPAS, netFinalApresPas);
         if (pasCheck != null) checks.add(pasCheck);
 
         return checks;
@@ -219,9 +237,12 @@ public class SalaryCalculationService {
         // Required fields on a French pay slip — keys are already diacritic-free
         Map<String, String> requiredFields = new LinkedHashMap<>();
         requiredFields.put("siret", "Numéro SIRET employeur");
-        requiredFields.put("conges payes", "Congés payés");
         requiredFields.put("net a payer", "Net à payer");
         requiredFields.put("cotisation", "Lignes de cotisations");
+        // congés payés: optional (cadres au forfait, nouveaux embauchés, certains logiciels n'affichent pas CP)
+        boolean hasCP = normalized.contains("conges payes") || normalized.contains(" cp ")
+            || normalized.contains("conge annuel") || normalized.contains("repos compensateur")
+            || normalized.contains("rtt") || normalized.contains("conge paye");
 
         int missing = 0;
         List<String> missingList = new ArrayList<>();
@@ -235,6 +256,10 @@ public class SalaryCalculationService {
                 missing++;
                 missingList.add(entry.getValue());
             }
+        }
+        if (!hasCP) {
+            missingList.add("Congés payés (optionnel — normal pour cadres au forfait)");
+            // CP absence counts as half a missing field — only tips the balance if other fields also missing
         }
 
         if (missing == 0) {
@@ -273,7 +298,7 @@ public class SalaryCalculationService {
             "convention collective", "conv. collective", "conv.collective",
             "convention coll", " ccn ", "ccn:", "ccn\t", "idcc",
             "syntec", "metallurgie", "batiment", "commerce de detail",
-            "transports routiers", "bureaux d'etudes", "bureaux d\u2019etudes"
+            "transports routiers", "bureaux d etudes", "bureaux detudes", "etudes techniques"
         };
         for (String indicator : indicators) {
             if (normalized.contains(indicator)) return true;
@@ -310,18 +335,14 @@ public class SalaryCalculationService {
 
     /**
      * Vérifie que le ratio Net/Brut est dans la plage attendue pour la CCN détectée.
-     * Utilise le net avant impôt (avant PAS) en priorité : le PAS varie de 0% à 45%
-     * selon le taux personnel de l'employé et fausserait le ratio attendu.
-     * Fall-back sur le net à payer final si net avant impôt non disponible (bulletin pré-2019).
+     * Le net passé est soit la valeur Vision (net avant PAS, prioritaire), soit le
+     * regex netAvantImpot. Le PAS personnel ne doit pas fausser le ratio CCN.
      * Plages basées sur les charges salariales françaises 2024 (régime général).
      */
-    private AnalysisResult.Check checkNetBrutRatio(Double brut, Double netAvantImpot,
-                                                    Double netFinal, String text) {
-        if (brut == null || brut <= 0) return null;
-        Double net = netAvantImpot != null ? netAvantImpot : netFinal;
-        if (net == null) return null;
+    private AnalysisResult.Check checkNetBrutRatio(Double brut, Double net, String text) {
+        if (brut == null || brut <= 0 || net == null) return null;
 
-        String netLabel = netAvantImpot != null ? "Net avant impôt" : "Net à payer";
+        String netLabel = "Net avant PAS";
 
         String normalized = normalizeDiacritics(text);
         double min, max;
@@ -366,10 +387,19 @@ public class SalaryCalculationService {
         if (netAvantImpot == null || netFinal == null) return null;
 
         if (pas == null) {
-            // Pas de ligne PAS trouvée — soit taux 0%, soit label non reconnu.
-            // Si les deux nets sont proches, le PAS est effectivement nul (OK).
-            // Sinon, on ne peut pas conclure → check ignoré.
-            return Math.abs(netAvantImpot - netFinal) <= 2 ? null : null;
+            // No PAS line found — either rate is 0% or label not recognized.
+            if (Math.abs(netAvantImpot - netFinal) > 2) {
+                return AnalysisResult.Check.builder()
+                    .category("Calculs")
+                    .label("Prélèvement à la source")
+                    .status("WARNING")
+                    .detail(String.format(
+                        "Net avant PAS (%.2f€) ≠ Net final (%.2f€) mais aucune ligne PAS trouvée"
+                            + " — vérifier le libellé du prélèvement à la source",
+                        netAvantImpot, netFinal))
+                    .build();
+            }
+            return null;
         }
 
         double calculatedNet = netAvantImpot - pas;
@@ -424,7 +454,7 @@ public class SalaryCalculationService {
             String raw = m.group(1).replaceAll("[\\s\u00a0]", "").replace(",", ".");
             try {
                 double val = Double.parseDouble(raw);
-                if (val >= 0.5 && val < 5000) { sum += val; count++; }
+                if (val >= 0.5 && val < Math.max(5000, brut != null ? brut * 0.5 : 5000)) { sum += val; count++; }
             } catch (NumberFormatException ignored) {}
         }
 
@@ -463,21 +493,16 @@ public class SalaryCalculationService {
     }
 
     /**
-     * Extracts the net final après PAS ("net à payer" excluding "net avant impôt" lines).
-     * Used in Check 0 to avoid false positives when Vision's salaireNet is the net avant PAS.
+     * Extrait le net final APRÈS prélèvement à la source.
+     * Cible les lignes contenant "net a payer" mais PAS "avant"
+     * (pour exclure "net a payer avant impôt sur le revenu").
      */
     private Double extractNetFinalApresPas(String[] lines) {
-        for (int i = 0; i < lines.length; i++) {
-            String norm = normalizeDiacritics(lines[i]);
-            if (norm.contains("net a payer")
-                    && !norm.contains("avant impot")
-                    && !norm.contains("avant prelevement")) {
-                Double val = largestAmountInLine(lines[i]);
+        for (String line : lines) {
+            String norm = normalizeDiacritics(line);
+            if (norm.contains("net a payer") && !norm.contains("avant")) {
+                Double val = largestAmountInLine(line);
                 if (val != null) return val;
-                if (i + 1 < lines.length) {
-                    val = largestAmountInLine(lines[i + 1]);
-                    if (val != null) return val;
-                }
             }
         }
         return null;
@@ -485,15 +510,14 @@ public class SalaryCalculationService {
 
     /**
      * Like extractAmountNearLabel but scans the SAME LINE ONLY (no window expansion).
-     * Used for values that are always on the same line as their label (e.g. PAS amount),
-     * to avoid cross-contaminating with adjacent lines that carry larger amounts.
+     * Returns the LAST amount on the line (PAS is always the last column in standard payslip format).
      */
     private Double extractAmountOnSameLine(String[] lines, String... labels) {
         for (String line : lines) {
             String norm = normalizeDiacritics(line);
             for (String label : labels) {
                 if (norm.contains(label)) {
-                    Double val = largestAmountInLine(line);
+                    Double val = lastAmountInLine(line);
                     if (val != null) return val;
                 }
             }
@@ -501,9 +525,24 @@ public class SalaryCalculationService {
         return null;
     }
 
+    /** Returns the LAST plausible salary amount (10–50000) found in a single line. */
+    private Double lastAmountInLine(String line) {
+        Matcher m = Pattern.compile("([0-9]{1,3}(?:[\\s ][0-9]{3})*[.,][0-9]{2})").matcher(line);
+        Double last = null;
+        while (m.find()) {
+            String raw = m.group(1).replaceAll("[\\s ]", "").replace(",", ".");
+            try {
+                double val = Double.parseDouble(raw);
+                if (val >= 10 && val <= 50000) last = val;
+            } catch (NumberFormatException ignored) {}
+        }
+        return last;
+    }
+
     /** Returns the LARGEST plausible salary amount (100–200 000) found in a single line. */
+    /** Returns the LARGEST plausible salary amount (100\u2013200 000) found in a single line. Requires decimal part to avoid capturing years/codes. */
     private Double largestAmountInLine(String line) {
-        Matcher m = Pattern.compile("([0-9]{1,3}(?:[\\s\u00a0][0-9]{3})*(?:[.,][0-9]{1,2})?)").matcher(line);
+        Matcher m = Pattern.compile("([0-9]{1,3}(?:[\\s\u00a0][0-9]{3})*[.,][0-9]{2})").matcher(line);
         Double best = null;
         while (m.find()) {
             String raw = m.group(1).replaceAll("[\\s\u00a0]", "").replace(",", ".");

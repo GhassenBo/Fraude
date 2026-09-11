@@ -69,7 +69,7 @@ public class FraudDetectionService {
         allChecks.addAll(claudeVisionService.detectForgery(pdfData.pdfBytes()));
 
         int score = computeScore(allChecks);
-        String verdict = computeVerdict(score);
+        String verdict = computeVerdictWithChecks(score, allChecks);
         String color = computeColor(score);
 
         user.setDocumentsUsed(user.getDocumentsUsed() + 1);
@@ -136,6 +136,20 @@ public class FraudDetectionService {
         if (score >= 75) return "AUTHENTIQUE";
         if (score >= 45) return "SUSPECT";
         return "FRAUDULEUX";
+    }
+
+    private String computeVerdictWithChecks(int score, List<AnalysisResult.Check> checks) {
+        String base = computeVerdict(score);
+        // A single FAILED in a critical category must prevent "AUTHENTIQUE" verdict
+        if ("AUTHENTIQUE".equals(base)) {
+            boolean hasCriticalFailed = checks.stream()
+                .filter(c -> "FAILED".equals(c.getStatus()))
+                .anyMatch(c -> "Calculs".equals(c.getCategory())
+                    || "Employeur".equals(c.getCategory())
+                    || "Intégrité PDF".equals(c.getCategory()));
+            if (hasCriticalFailed) return "SUSPECT";
+        }
+        return base;
     }
 
     private String computeColor(int score) {

@@ -83,15 +83,16 @@ public class PdfForensicsService {
     // ── Check 3 : Suspicious annotations ─────────────────────────────────────
 
     private AnalysisResult.Check checkSuspiciousAnnotations(PDDocument document) {
-        int count = 0;
+        int editCount = 0;   // FreeText, Ink — text/drawing modifications
+        int highlightCount = 0; // Highlight, Stamp — read-only annotations, usually benign
         try {
             for (int i = 0; i < document.getNumberOfPages(); i++) {
                 for (PDAnnotation ann : document.getPage(i).getAnnotations()) {
                     String sub = ann.getSubtype();
-                    if ("FreeText".equals(sub) || "Ink".equals(sub)
-                            || "Stamp".equals(sub) || "Highlight".equals(sub)
-                            || "Redact".equals(sub)) {
-                        count++;
+                    if ("FreeText".equals(sub) || "Ink".equals(sub) || "Redact".equals(sub)) {
+                        editCount++;
+                    } else if ("Highlight".equals(sub) || "Stamp".equals(sub)) {
+                        highlightCount++;
                     }
                 }
             }
@@ -99,13 +100,18 @@ public class PdfForensicsService {
             return check("Intégrité PDF", "Annotations suspectes", "WARNING",
                 "Impossible d'analyser les annotations : " + e.getMessage());
         }
-        if (count > 0) {
-            return check("Intégrité PDF", "Annotations suspectes", "FAILED",
-                count + " annotation(s) de type texte libre / tampon / surlignage"
-                    + " — ajout de contenu post-génération détecté");
+        if (editCount > 0) {
+            return check("Intégrité PDF", "Annotations suspectes", "WARNING",
+                editCount + " annotation(s) d'édition (FreeText/Ink/Redact) détectée(s)"
+                    + " — ajout de contenu textuel post-génération"
+                    + (highlightCount > 0 ? " + " + highlightCount + " surlignage(s)" : ""));
+        }
+        if (highlightCount > 0) {
+            return check("Intégrité PDF", "Annotations suspectes", "OK",
+                highlightCount + " annotation(s) de lecture (surlignage/tampon) — normal en contexte professionnel");
         }
         return check("Intégrité PDF", "Annotations suspectes", "OK",
-            "Aucune annotation suspecte (FreeText, Ink, Stamp, Redact)");
+            "Aucune annotation d'édition détectée");
     }
 
     // ── Check 4 : White fill rectangles ("white-out" technique) ──────────────
@@ -123,10 +129,10 @@ public class PdfForensicsService {
             }
         }
         // Allow a few (table layout), flag an unusually high count
-        if (total > 10) {
+        if (total > 30) {
             return check("Intégrité PDF", "Rectangles de masquage", "WARNING",
                 total + " rectangle(s) blanc(s) remplis détectés — possible technique"
-                    + " de masquage pour dissimuler le texte original");
+                    + " de masquage (certains logiciels de paie utilisent des fonds blancs structurels)");
         }
         return check("Intégrité PDF", "Rectangles de masquage", "OK",
             "Nombre de rectangles blancs dans la norme (" + total + ")");

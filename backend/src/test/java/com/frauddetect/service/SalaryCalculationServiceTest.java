@@ -40,7 +40,7 @@ class SalaryCalculationServiceTest {
         // 75% ratio — within the 60-90% normal range
         List<AnalysisResult.Check> checks = service.analyzeCalculations(
             "net a payer\nsiret\ncotisation\nconges payes\nconvention collective",
-            docInfo("2500.00 €", "1875.00 €"));
+            docInfo("2500.00 €", "1875.00 €"), true);
 
         AnalysisResult.Check check = findCheck(checks, "Ratio Net/Brut");
         assertThat(check.getStatus()).isEqualTo("OK");
@@ -51,7 +51,7 @@ class SalaryCalculationServiceTest {
     void ratioNetBrut_netSuperiorToBrut_shouldFail() {
         List<AnalysisResult.Check> checks = service.analyzeCalculations(
             "net a payer\nsiret\ncotisation\nconges payes\nconvention collective",
-            docInfo("2000.00 €", "3000.00 €"));
+            docInfo("2000.00 €", "3000.00 €"), true);
 
         AnalysisResult.Check check = findCheck(checks, "Ratio Net/Brut");
         assertThat(check.getStatus()).isEqualTo("FAILED");
@@ -59,15 +59,15 @@ class SalaryCalculationServiceTest {
     }
 
     @Test
-    void ratioNetBrut_ratioAbove90_shouldFail() {
-        // 95% — cotisations semblent manquantes
+    void ratioNetBrut_ratioAbove93_shouldWarn() {
+        // 95% — ratio élevé, vérifier exonérations
         List<AnalysisResult.Check> checks = service.analyzeCalculations(
-            "net a payer\nsiret\ncotisation\nconges payes\nconvention collective",
-            docInfo("2000.00 €", "1900.00 €"));
+            "net a payer\nsiret\ncotisation\nconvention collective",
+            docInfo("2000.00 €", "1900.00 €"), true);
 
         AnalysisResult.Check check = findCheck(checks, "Ratio Net/Brut");
-        assertThat(check.getStatus()).isEqualTo("FAILED");
-        assertThat(check.getDetail()).contains("trop élevé");
+        assertThat(check.getStatus()).isEqualTo("WARNING");
+        assertThat(check.getDetail()).contains("élevé");
     }
 
     @Test
@@ -75,7 +75,7 @@ class SalaryCalculationServiceTest {
         // 50% — inhabituel
         List<AnalysisResult.Check> checks = service.analyzeCalculations(
             "net a payer\nsiret\ncotisation\nconges payes\nconvention collective",
-            docInfo("3000.00 €", "1500.00 €"));
+            docInfo("3000.00 €", "1500.00 €"), true);
 
         AnalysisResult.Check check = findCheck(checks, "Ratio Net/Brut");
         assertThat(check.getStatus()).isEqualTo("WARNING");
@@ -83,9 +83,22 @@ class SalaryCalculationServiceTest {
     }
 
     @Test
-    void ratioNetBrut_missingValues_shouldWarn() {
+    void ratioNetBrut_visionDisabled_shouldWarnAboutVision() {
+        // Sans Vision, le check doit retourner un WARNING explicite (pas de regex fallback)
         List<AnalysisResult.Check> checks = service.analyzeCalculations(
-            "aucun montant ici", null);
+            "net a payer\nsiret\ncotisation\nconges payes\nconvention collective",
+            docInfo("2500.00 €", "1875.00 €"), false);
+
+        AnalysisResult.Check check = findCheck(checks, "Ratio Net/Brut");
+        assertThat(check.getStatus()).isEqualTo("WARNING");
+        assertThat(check.getDetail()).contains("Vision IA");
+    }
+
+    @Test
+    void ratioNetBrut_missingValues_shouldWarn() {
+        // Vision activée mais valeurs absentes
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(
+            "aucun montant ici", null, true);
 
         AnalysisResult.Check check = findCheck(checks, "Ratio Net/Brut");
         assertThat(check.getStatus()).isEqualTo("WARNING");
@@ -105,14 +118,14 @@ class SalaryCalculationServiceTest {
     }
 
     @Test
-    void smicCheck_belowSmic_shouldFail() {
-        // 1766.92€ is SMIC — use 1000€ which is clearly below
+    void smicCheck_belowSmic_shouldWarn() {
+        // 1766.92€ is SMIC — use 1000€ which is clearly below (may be part-time, apprenti, etc.)
         List<AnalysisResult.Check> checks = service.analyzeCalculations(
-            "net a payer\nsiret\ncotisation\nconges payes\nconvention collective",
+            "net a payer\nsiret\ncotisation\nconvention collective",
             docInfo("1000.00 €", "750.00 €"));
 
         AnalysisResult.Check check = findCheck(checks, "Comparaison SMIC");
-        assertThat(check.getStatus()).isEqualTo("FAILED");
+        assertThat(check.getStatus()).isEqualTo("WARNING");
         assertThat(check.getDetail()).contains("inférieur au SMIC");
     }
 
@@ -138,7 +151,7 @@ class SalaryCalculationServiceTest {
             + "siret\ncotisation\nconges payes\nconvention collective";
 
         List<AnalysisResult.Check> checks = service.analyzeCalculations(
-            text, docInfo("3000.00 €", "2500.00 €"));
+            text, docInfo("3000.00 €", "2500.00 €"), true);
 
         AnalysisResult.Check check = findCheck(checks, "Cohérence Net social / Net à payer");
         assertThat(check.getStatus()).isEqualTo("FAILED");
@@ -208,23 +221,23 @@ class SalaryCalculationServiceTest {
             + "net a payer\nsiret\nconges payes\nconvention collective";
 
         List<AnalysisResult.Check> checks = service.analyzeCalculations(
-            text, docInfo("3000.00 €", "2250.00 €"));
+            text, docInfo("3000.00 €", "2250.00 €"), true);
 
         AnalysisResult.Check check = findCheck(checks, "Cohérence des cotisations");
         assertThat(check.getStatus()).isEqualTo("OK");
     }
 
     @Test
-    void cotisationsCheck_incoherent_shouldFail() {
+    void cotisationsCheck_incoherent_shouldWarn() {
         // brut=3000, net=2250, diff=750 but cotisations=200 → gap=550 > tolerance 150
         String text = "total cotisations salariales 200.00\n"
-            + "net a payer\nsiret\nconges payes\nconvention collective";
+            + "net a payer\nsiret\nconvention collective";
 
         List<AnalysisResult.Check> checks = service.analyzeCalculations(
-            text, docInfo("3000.00 €", "2250.00 €"));
+            text, docInfo("3000.00 €", "2250.00 €"), true);
 
         AnalysisResult.Check check = findCheck(checks, "Cohérence des cotisations");
-        assertThat(check.getStatus()).isEqualTo("FAILED");
+        assertThat(check.getStatus()).isEqualTo("WARNING");
     }
 
     // ── docInfo parsing ───────────────────────────────────────────────────────
@@ -234,7 +247,7 @@ class SalaryCalculationServiceTest {
         // "4 249,60 €" — formatted French amount
         List<AnalysisResult.Check> checks = service.analyzeCalculations(
             "net a payer\nsiret\ncotisation\nconges payes\nconvention collective",
-            docInfo("4 249,60 €", "3 000,00 €"));
+            docInfo("4 249,60 €", "3 000,00 €"), true);
 
         AnalysisResult.Check check = findCheck(checks, "Ratio Net/Brut");
         assertThat(check.getStatus()).isEqualTo("OK");
@@ -257,20 +270,20 @@ class SalaryCalculationServiceTest {
 
         AnalysisResult.Check check = findCheck(checks, "Ratio Net/Brut CCN");
         assertThat(check.getStatus()).isEqualTo("OK");
-        assertThat(check.getDetail()).contains("Net avant impôt");
+        assertThat(check.getDetail()).contains("Net avant PAS");
         assertThat(check.getDetail()).contains("Syntec");
     }
 
     @Test
     void checkNetBrutRatio_syntec_fallsBackToNetFinal_whenNoAvantImpot() {
-        // Aucun label "net avant impôt" dans le texte → fallback sur net à payer (78%)
+        // Aucun label "net avant impôt" dans le texte → fallback sur net Vision (78%)
         List<AnalysisResult.Check> checks = service.analyzeCalculations(
             "net a payer\nsiret\ncotisation\nconges payes\nConv. Collective : Syntec",
-            docInfo("4000.00 €", "3120.00 €")); // 78%
+            docInfo("4000.00 €", "3120.00 €"), true); // 78%
 
         AnalysisResult.Check check = findCheck(checks, "Ratio Net/Brut CCN");
         assertThat(check.getStatus()).isEqualTo("OK");
-        assertThat(check.getDetail()).contains("Net à payer");
+        assertThat(check.getDetail()).contains("Net avant PAS");
     }
 
     @Test
@@ -278,7 +291,7 @@ class SalaryCalculationServiceTest {
         // Syntec: [0.74, 0.82] — ratio 70% est sous 74%
         List<AnalysisResult.Check> checks = service.analyzeCalculations(
             "net a payer\nsiret\ncotisation\nconges payes\nConv. Collective : Syntec",
-            docInfo("4000.00 €", "2800.00 €")); // 70%
+            docInfo("4000.00 €", "2800.00 €"), true); // 70%
 
         AnalysisResult.Check check = findCheck(checks, "Ratio Net/Brut CCN");
         assertThat(check.getStatus()).isEqualTo("FAILED");
@@ -290,7 +303,7 @@ class SalaryCalculationServiceTest {
         // Syntec: [0.74, 0.82] — ratio 85% is above 82%
         List<AnalysisResult.Check> checks = service.analyzeCalculations(
             "net a payer\nsiret\ncotisation\nconges payes\nConv. Collective : Syntec",
-            docInfo("4000.00 €", "3400.00 €")); // 85%
+            docInfo("4000.00 €", "3400.00 €"), true); // 85%
 
         AnalysisResult.Check check = findCheck(checks, "Ratio Net/Brut CCN");
         assertThat(check.getStatus()).isEqualTo("FAILED");
@@ -301,7 +314,7 @@ class SalaryCalculationServiceTest {
         // Métallurgie: [0.72, 0.80] — ratio 76%
         List<AnalysisResult.Check> checks = service.analyzeCalculations(
             "net a payer\nsiret\ncotisation\nconges payes\nConvention Metallurgie",
-            docInfo("3000.00 €", "2280.00 €")); // 76%
+            docInfo("3000.00 €", "2280.00 €"), true); // 76%
 
         AnalysisResult.Check check = findCheck(checks, "Ratio Net/Brut CCN");
         assertThat(check.getStatus()).isEqualTo("OK");
@@ -313,7 +326,7 @@ class SalaryCalculationServiceTest {
         // Default: [0.70, 0.83] — ratio 75%
         List<AnalysisResult.Check> checks = service.analyzeCalculations(
             "net a payer\nsiret\ncotisation\nconges payes\nconvention collective",
-            docInfo("3000.00 €", "2250.00 €")); // 75%
+            docInfo("3000.00 €", "2250.00 €"), true); // 75%
 
         AnalysisResult.Check check = findCheck(checks, "Ratio Net/Brut CCN");
         assertThat(check.getStatus()).isEqualTo("OK");
@@ -346,7 +359,7 @@ class SalaryCalculationServiceTest {
     void checkCotisationsSum_coherent_shouldBeOK() {
         List<AnalysisResult.Check> checks = service.analyzeCalculations(
             COTIS_TEXT_COHERENT,
-            docInfo("3000.00 €", "2240.72 €"));
+            docInfo("3000.00 €", "2240.72 €"), true);
 
         AnalysisResult.Check check = findCheck(checks, "Somme des cotisations");
         assertThat(check.getStatus()).isEqualTo("OK");
@@ -358,7 +371,7 @@ class SalaryCalculationServiceTest {
         // Same cotisations sum ≈ 759€, but net declared as 1500 → gap > 50€
         List<AnalysisResult.Check> checks = service.analyzeCalculations(
             COTIS_TEXT_COHERENT,
-            docInfo("3000.00 €", "1500.00 €"));
+            docInfo("3000.00 €", "1500.00 €"), true);
 
         AnalysisResult.Check check = findCheck(checks, "Somme des cotisations");
         assertThat(check.getStatus()).isEqualTo("FAILED");
@@ -370,7 +383,7 @@ class SalaryCalculationServiceTest {
         // net = 2265 → gap = |2240.72 - 2265| ≈ 24€ → between 20 and 50
         List<AnalysisResult.Check> checks = service.analyzeCalculations(
             COTIS_TEXT_COHERENT,
-            docInfo("3000.00 €", "2265.00 €"));
+            docInfo("3000.00 €", "2265.00 €"), true);
 
         AnalysisResult.Check check = findCheck(checks, "Somme des cotisations");
         assertThat(check.getStatus()).isEqualTo("WARNING");
@@ -381,15 +394,13 @@ class SalaryCalculationServiceTest {
 
     @Test
     void checkPAS_coherent_shouldBeOK() {
-        // net avant PAS = 3 036,60 ; PAS = 170,88 ; net final = 3036.60 - 170.88 = 2865.72
-        // PAS extrait par extractAmountOnSameLine → prend 170,88 sur sa propre ligne,
-        // pas le 3 036,60 de la ligne voisine.
+        // Vision returns net avant PAS = 3036.60 ; PAS = 170.88 ; net final après PAS = 2865.72
         String text = "net a payer avant impot 3 036,60\n" +
             "prelevement a la source 170,88\n" +
-            "net a payer\nsiret\ncotisation\nconges payes\nconvention collective";
+            "net a payer 2 865,72\nsiret\ncotisation\nconges payes\nconvention collective";
 
         List<AnalysisResult.Check> checks = service.analyzeCalculations(
-            text, docInfo("4000.00 €", "2865.72 €"));
+            text, docInfo("4000.00 €", "3036.60 €"), true);
 
         AnalysisResult.Check check = findCheck(checks, "Prélèvement à la source");
         assertThat(check.getStatus()).isEqualTo("OK");
@@ -399,14 +410,14 @@ class SalaryCalculationServiceTest {
 
     @Test
     void checkPAS_netFinalFalsified_shouldWarn() {
-        // net avant PAS = 3 036,60 ; PAS = 170,88 → expected net = 2865.72
-        // net déclaré = 3 507,16 (falsifié +641€)
+        // Vision returns net avant PAS = 3036.60 ; PAS = 170.88 → expected = 2865.72
+        // but net final in doc = 3507.16 (falsifié +641€)
         String text = "net a payer avant impot 3 036,60\n" +
             "prelevement a la source 170,88\n" +
-            "net a payer\nsiret\ncotisation\nconges payes\nconvention collective";
+            "net a payer 3 507,16\nsiret\ncotisation\nconges payes\nconvention collective";
 
         List<AnalysisResult.Check> checks = service.analyzeCalculations(
-            text, docInfo("4000.00 €", "3507.16 €"));
+            text, docInfo("4000.00 €", "3036.60 €"), true);
 
         AnalysisResult.Check check = findCheck(checks, "Prélèvement à la source");
         assertThat(check.getStatus()).isEqualTo("WARNING");
@@ -415,12 +426,11 @@ class SalaryCalculationServiceTest {
 
     @Test
     void checkPAS_noPasLine_netsSimilar_checkSkipped() {
-        // Pas de ligne PAS → check ignoré (retourne null)
         String text = "net a payer avant impot 865,72\n" +
             "net a payer\nsiret\ncotisation\nconges payes\nconvention collective";
 
         List<AnalysisResult.Check> checks = service.analyzeCalculations(
-            text, docInfo("1200.00 €", "865.72 €"));
+            text, docInfo("1200.00 €", "865.72 €"), true);
 
         boolean hasPasCheck = checks.stream()
             .anyMatch(c -> "Prélèvement à la source".equals(c.getLabel()));
@@ -429,10 +439,9 @@ class SalaryCalculationServiceTest {
 
     @Test
     void checkPAS_noNetAvantImpot_checkSkipped() {
-        // Aucun label "net avant impôt" → check ignoré
         List<AnalysisResult.Check> checks = service.analyzeCalculations(
             "net a payer\nsiret\ncotisation\nconges payes\nconvention collective",
-            docInfo("4000.00 €", "3000.00 €"));
+            docInfo("4000.00 €", "3000.00 €"), true);
 
         boolean hasPasCheck = checks.stream()
             .anyMatch(c -> "Prélèvement à la source".equals(c.getLabel()));
@@ -441,13 +450,12 @@ class SalaryCalculationServiceTest {
 
     @Test
     void checkCotisationsSum_fewerThan3Lines_skipped() {
-        // Only 2 cotisation lines — check should be skipped (not enough data)
         String text = "Assurance maladie 6,70 % 3000,00 201,00\n" +
             "Vieillesse 0,40 % 3000,00 12,00\n" +
             "net a payer\nsiret\nconges payes\nconvention collective";
 
         List<AnalysisResult.Check> checks = service.analyzeCalculations(
-            text, docInfo("3000.00 €", "2787.00 €"));
+            text, docInfo("3000.00 €", "2787.00 €"), true);
 
         boolean hasCotisSum = checks.stream()
             .anyMatch(c -> "Somme des cotisations".equals(c.getLabel()));

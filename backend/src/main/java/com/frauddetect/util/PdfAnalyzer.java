@@ -1,6 +1,8 @@
 package com.frauddetect.util;
 
 import com.frauddetect.model.AnalysisResult;
+import com.frauddetect.service.ClaudeVisionService;
+import com.frauddetect.service.PdfForensicsService;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDDocumentInformation;
@@ -8,17 +10,33 @@ import org.apache.pdfbox.text.PDFTextStripper;
 import org.springframework.stereotype.Component;
 
 import java.io.InputStream;
+import java.text.Normalizer;
 import java.util.*;
 import java.util.regex.*;
 
 @Component
 public class PdfAnalyzer {
 
+    private final ClaudeVisionService claudeVisionService;
+    private final PdfForensicsService forensicsService;
+
+    public PdfAnalyzer(ClaudeVisionService claudeVisionService, PdfForensicsService forensicsService) {
+        this.claudeVisionService = claudeVisionService;
+        this.forensicsService = forensicsService;
+    }
+
     // Known payroll software producers
     private static final List<String> LEGIT_PRODUCERS = List.of(
         "sage", "adp", "silae", "cegid", "hr access", "peopledoc",
         "payfit", "lucca", "workday", "sap", "oracle", "quadratus",
-        "microsoft dynamics", "paye", "isapaye"
+        "microsoft dynamics", "paye", "isapaye", "decidium", "nibelis",
+        "pegase", "novapaie", "hr path", "inser", "cegedim", "talentia",
+        "emploi", "paie", "bulletin", "reportlab", "itext", "pdfbox",
+        "jasper", "apache", "crystal reports",
+        // Government / URSSAF platforms
+        "urssaf", "tese", "cea", "net-entreprises", "dsn",
+        // Common PDF generation libraries used by payroll software
+        "fpdf", "tcpdf", "fo2pdf", "apache fop", "xsl-fo"
     );
 
     private static final List<String> SUSPICIOUS_PRODUCERS = List.of(
@@ -26,11 +44,33 @@ public class PdfAnalyzer {
         "gimp", "canva", "google docs", "pages", "inkscape"
     );
 
+    // Words that appear in table headers — not a valid company name
+    private static final List<String> TABLE_HEADER_WORDS = List.of(
+        "taux", "montant", "base", "salariale", "patronale", "employeur",
+        "cotisation", "brut", "net", "total"
+    );
+
+    // Cotisation fund / institution names — must not be matched as employee names
+    private static final List<String> NOT_EMPLOYEE_KEYWORDS = List.of(
+        "agirc", "arrco", "malakoff", "humanis", "prevoyance", "prévoyance",
+        "retraite", "complementaire", "complémentaire", "assurance", "mutuelle",
+        "securite", "sécurité", "sociale", "chomage", "chômage", "prelevement",
+        "prélèvement", "cotisation", "urssaf", "cipav", "ircantec",
+        "ag2r", "apec", "fafiec", "opco", "prev", "soin", "tranche"
+    );
+
+    // Document-type titles — must not be matched as employee names
+    private static final List<String> DOCUMENT_TITLE_KEYWORDS = List.of(
+        "bulletin de paie", "bulletin de salaire", "fiche de paie",
+        "fiche de salaire", "bulletin de solde", "bulletin de rémunération",
+        "bulletin de remuneration"
+    );
+
     public record PdfAnalysisData(
         String rawText,
+        byte[] pdfBytes,
         AnalysisResult.DocumentInfo documentInfo,
-        List<AnalysisResult.Check> metadataChecks,
-        byte[] pdfBytes
+        List<AnalysisResult.Check> metadataChecks
     ) {}
 
     public PdfAnalysisData analyze(InputStream inputStream) throws Exception {
@@ -42,8 +82,11 @@ public class PdfAnalyzer {
             PDFTextStripper stripper = new PDFTextStripper();
             String rawText = stripper.getText(document);
 
-            String producer = Optional.ofNullable(info.getProducer()).orElse("").toLowerCase();
-            String creator = Optional.ofNullable(info.getCreator()).orElse("").toLowerCase();
+            // Normalize metadata — some PDF generators output "null" as a literal string
+            String rawProducer = Optional.ofNullable(info.getProducer()).orElse("").toLowerCase();
+            String rawCreator = Optional.ofNullable(info.getCreator()).orElse("").toLowerCase();
+            final String producer = "null".equals(rawProducer) ? "" : rawProducer;
+            final String creator = "null".equals(rawCreator) ? "" : rawCreator;
             String creationDate = info.getCreationDate() != null ? info.getCreationDate().getTime().toString() : "Inconnue";
             String modDate = info.getModificationDate() != null ? info.getModificationDate().getTime().toString() : null;
             boolean wasModified = modDate != null && !modDate.equals(creationDate);
@@ -67,12 +110,22 @@ public class PdfAnalyzer {
                     .status("OK")
                     .detail("Logiciel de paie reconnu : " + (producer.isBlank() ? creator : producer))
                     .build());
+            } else if (producer.isBlank() && creator.isBlank()) {
+                // No metadata at all — normal for government portals (URSSAF TESE) and
+                // many enterprise payroll systems that don't embed software metadata
+                checks.add(AnalysisResult.Check.builder()
+                    .category("Métadonnées")
+                    .label("Logiciel de création")
+                    .status("OK")
+                    .detail("Métadonnées logiciel absentes — courant pour les portails officiels et logiciels de paie professionnels")
+                    .build());
             } else {
+                // A value IS present but not in our whitelist — worth noting
                 checks.add(AnalysisResult.Check.builder()
                     .category("Métadonnées")
                     .label("Logiciel de création")
                     .status("WARNING")
-                    .detail("Logiciel non reconnu : " + (producer.isBlank() && creator.isBlank() ? "Inconnu" : producer + " " + creator))
+                    .detail("Logiciel non reconnu : " + (producer.isBlank() ? creator : producer).trim())
                     .build());
             }
 
@@ -81,8 +134,9 @@ public class PdfAnalyzer {
                 checks.add(AnalysisResult.Check.builder()
                     .category("Métadonnées")
                     .label("Modification du document")
-                    .status("FAILED")
-                    .detail("Document modifié après sa création — date de modification : " + modDate)
+                    .status("WARNING")
+                    .detail("Document modifié après sa création — date de modification : " + modDate
+                        + " (ouverture/fermeture par un lecteur PDF met aussi à jour cette date)")
                     .build());
             } else {
                 checks.add(AnalysisResult.Check.builder()
@@ -94,7 +148,7 @@ public class PdfAnalyzer {
             }
 
             // Check 3: Page count
-            if (pageCount > 3) {
+            if (pageCount > 5) {
                 checks.add(AnalysisResult.Check.builder()
                     .category("Métadonnées")
                     .label("Nombre de pages")
@@ -110,23 +164,66 @@ public class PdfAnalyzer {
                     .build());
             }
 
-            // Extract document info from text
-            AnalysisResult.DocumentInfo docInfo = extractDocumentInfo(rawText, producer, creationDate, modDate, wasModified, pageCount);
+            // Try Claude Vision first — more accurate on complex multi-column layouts.
+            // Fall back field-by-field to regex extraction for anything Vision left null.
+            AnalysisResult.DocumentInfo regexInfo = extractDocumentInfo(rawText, producer, creationDate, modDate, wasModified, pageCount);
+            ClaudeVisionService.VisionExtraction vision = claudeVisionService.extractFields(bytes);
 
-            return new PdfAnalysisData(rawText, docInfo, checks, bytes);
+            AnalysisResult.DocumentInfo docInfo;
+            if (vision != null) {
+                docInfo = AnalysisResult.DocumentInfo.builder()
+                    // SIRET : regex PDFBox en priorité (Vision hallucine des chiffres),
+                    // Vision sert de fallback uniquement si PDFBox n'a rien trouvé.
+                    .siret(mergedSiret(regexInfo.getSiret(), vision.siret()))
+                    // Tous les autres champs : Vision prioritaire, regex en fallback.
+                    .employeur(coalesce(vision.employeur(), regexInfo.getEmployeur()))
+                    .employe(coalesce(vision.employe(), regexInfo.getEmploye()))
+                    .periode(coalesce(vision.periode(), regexInfo.getPeriode()))
+                    .salaireBrut(coalesce(vision.salaireBrut(), regexInfo.getSalaireBrut()))
+                    .salaireNet(coalesce(vision.salaireNet(), regexInfo.getSalaireNet()))
+                    .pdfCreatedWith(regexInfo.getPdfCreatedWith())
+                    .pdfCreationDate(regexInfo.getPdfCreationDate())
+                    .pdfModifiedDate(regexInfo.getPdfModifiedDate())
+                    .pdfModified(regexInfo.isPdfModified())
+                    .pageCount(regexInfo.getPageCount())
+                    .build();
+            } else {
+                docInfo = regexInfo;
+            }
+
+            // Forensic structure analysis — runs inside the same open document (no double-load)
+            checks.addAll(forensicsService.analyze(bytes, document));
+
+            return new PdfAnalysisData(rawText, bytes, docInfo, checks);
         }
     }
 
     private AnalysisResult.DocumentInfo extractDocumentInfo(String text, String producer,
                                                               String creationDate, String modDate,
                                                               boolean wasModified, int pageCount) {
+        String[] lines = text.split("\\r?\\n");
+
+        // "net fiscal" and "net imposable" excluded: they are YTD/tax-declaration values,
+        // not the actual monthly net à payer (would extract wrong cumul values).
+        String brutStr = extractAmountNearLabel(lines,
+            "salaire brut", "remuneration brute", "remuneration brut",
+            "total remuneration brute", "total remuneration brut",
+            "brut total", "total brut", "brut fiscal", "brut :");
+        String netStr = extractAmountNearLabel(lines,
+            "net a payer", "net paye", "net verse", "net avant impot");
+
+        // Sanity check: net cannot exceed brut on a payslip — discard if impossible
+        if (brutStr != null && netStr != null && parseAmount(netStr) > parseAmount(brutStr)) {
+            netStr = null;
+        }
+
         return AnalysisResult.DocumentInfo.builder()
-            .employeur(extractField(text, "(?i)(employeur|société|entreprise|raison sociale)[\\s:]*([A-Z][^\\n]{2,50})"))
+            .employeur(extractEmployeur(text, lines))
             .siret(extractSiret(text))
-            .employe(extractField(text, "(?i)(nom|salarié|employé)[\\s:]*([A-Z][A-Z\\s-]{2,40})"))
-            .periode(extractField(text, "(?i)(période|mois|du)[\\s:]*([A-Za-zéàû]+\\s+\\d{4})"))
-            .salaireBrut(extractMontant(text, "(?i)(salaire\\s*brut|brut\\s+total)[\\s:€]*([\\d\\s,.]+)"))
-            .salaireNet(extractMontant(text, "(?i)(net\\s+[àa]\\s+payer|net\\s+payé|net\\s+imposable)[\\s:€]*([\\d\\s,.]+)"))
+            .employe(extractEmploye(text, lines))
+            .periode(extractPeriode(text, lines))
+            .salaireBrut(brutStr)
+            .salaireNet(netStr)
             .pdfCreatedWith(producer.isBlank() ? "Inconnu" : producer)
             .pdfCreationDate(creationDate)
             .pdfModifiedDate(modDate)
@@ -135,31 +232,298 @@ public class PdfAnalyzer {
             .build();
     }
 
-    private String extractField(String text, String regex) {
-        try {
-            Matcher m = Pattern.compile(regex).matcher(text);
-            if (m.find() && m.groupCount() >= 2) return m.group(2).trim();
-        } catch (Exception ignored) {}
+    private static <T> T coalesce(T first, T second) {
+        return first != null ? first : second;
+    }
+
+    /**
+     * Fusionne le SIRET extrait par regex PDFBox (prioritaire) et par Vision (fallback).
+     * Loggue si les deux sources donnent des valeurs différentes pour faciliter le diagnostic.
+     */
+    private String mergedSiret(String regexSiret, String visionSiret) {
+        if (regexSiret != null && visionSiret != null && !regexSiret.equals(visionSiret)) {
+            System.out.println("[SIRET] Divergence regex/Vision — regex: " + regexSiret
+                + " | Vision: " + visionSiret + " → regex PDFBox prioritaire");
+        }
+        return regexSiret != null ? regexSiret : visionSiret;
+    }
+
+    // ── Employeur ─────────────────────────────────────────────────────────────
+
+    private String extractEmployeur(String text, String[] lines) {
+        // 1. Prefer "Raison sociale : <NAME>" — most explicit label
+        for (String line : lines) {
+            Matcher m = Pattern.compile("(?i)raison\\s+soci[ae]le\\s*[:\\s]+(.+)").matcher(line);
+            if (m.find()) {
+                String name = m.group(1).trim();
+                if (!name.isBlank() && name.length() > 2 && !isTableHeader(name)) return name;
+            }
+        }
+        // 2. Legal entity prefix (SAS, SARL, etc.) — limit to first 25 lines to avoid cotisations
+        for (int i = 0; i < Math.min(25, lines.length); i++) {
+            Matcher m = Pattern.compile("\\b((?:SAS|SARL|SA|SCI|SASU|EURL|EIRL|SNC|SCP|SCOP)\\s+[A-ZÀÂÉÈÊÎÔÙÛÇ][A-ZÀÂÉÈÊÎÔÙÛÇ\\s&\\-']{1,60})").matcher(lines[i]);
+            if (m.find()) return m.group(1).trim();
+        }
+        // 3. Company name is almost always just above the SIRET line
+        for (int i = 0; i < lines.length; i++) {
+            String lower = lines[i].toLowerCase();
+            if (lower.contains("siret") || lower.contains("siren")) {
+                for (int j = Math.max(0, i - 4); j < i; j++) {
+                    String candidate = lines[j].trim();
+                    if (isValidCompanyName(candidate)) return candidate;
+                }
+            }
+        }
+        // 4. First 6 non-blank lines heuristic: company name is at the very top of most bulletins
+        int count = 0;
+        for (String line : lines) {
+            String candidate = line.trim();
+            if (candidate.isBlank()) continue;
+            if (++count > 6) break;
+            if (isValidCompanyName(candidate)) return candidate;
+        }
         return null;
     }
+
+    /** Returns true if the line looks like a company name (not an address, not a table header, not an institution) */
+    private boolean isValidCompanyName(String candidate) {
+        if (candidate.isBlank() || candidate.length() < 4) return false;
+        if (candidate.matches("\\d.*")) return false;                        // starts with digit = address/number
+        if (candidate.matches(".*\\b\\d{5}\\b.*")) return false;             // contains postal code
+        String lower = candidate.toLowerCase();
+        if (lower.contains("siret") || lower.contains("siren")) return false; // SIRET line itself
+        if (isTableHeader(candidate)) return false;
+        if (isInstitutionName(lower)) return false;
+        if (Pattern.compile("[A-ZÀÂÉÈÊÎÔÙÛÇ]{3,}").matcher(candidate).find()) return true;
+        return false;
+    }
+
+    private boolean isTableHeader(String text) {
+        String lower = text.toLowerCase();
+        int matches = 0;
+        for (String word : TABLE_HEADER_WORDS) {
+            if (lower.contains(word)) matches++;
+        }
+        return matches >= 2;
+    }
+
+    // ── Employé ───────────────────────────────────────────────────────────────
+
+    private String extractEmploye(String text, String[] lines) {
+        // 1. Explicit "Monsieur" / "Madame" / "Mme" title — NOT short "M." which is too ambiguous
+        Matcher m = Pattern.compile("(?i)(?:Monsieur|Madame|Mme\\.?)\\s+([A-ZÀÂÉÈÊÎÔÙÛÇ][A-ZÀÂÉÈÊÎÔÙÛÇ\\s\\-]{2,50})").matcher(text);
+        while (m.find()) {
+            String name = m.group(1).trim();
+            String lower = name.toLowerCase();
+            if (!lower.contains("rue") && !lower.contains("avenue")
+                    && !lower.contains("boulevard") && !lower.contains("allée")
+                    && !isInstitutionName(lower)) {
+                return name;
+            }
+        }
+        // 1b. "LASTNAME Firstname" pattern near an address line (name appears just above address)
+        for (int i = 0; i < lines.length - 1; i++) {
+            String next = lines[i + 1].trim();
+            // next line is an address if it starts with a number or contains "rue","boulevard","avenue","allée"
+            boolean nextIsAddress = next.matches("^\\d+.*") ||
+                next.toLowerCase().contains("rue") || next.toLowerCase().contains("boulevard") ||
+                next.toLowerCase().contains("avenue") || next.toLowerCase().contains("allée") ||
+                next.toLowerCase().contains("chemin") || next.toLowerCase().contains("impasse");
+            if (nextIsAddress) {
+                String candidate = lines[i].trim();
+                String lowerCand = candidate.toLowerCase();
+                // Must look like "BORGI Ghassen" — starts uppercase, has a space, no digits
+                // Skip document titles like "BULLETIN DE PAIE"
+                boolean isDocTitle = DOCUMENT_TITLE_KEYWORDS.stream().anyMatch(lowerCand::contains);
+                if (!isDocTitle
+                        && candidate.matches("[A-ZÀÂÉÈÊÎÔÙÛÇ]{2,}\\s+[A-Za-zÀ-ÿ\\-]{2,}.*")
+                        && !candidate.matches(".*\\d.*")
+                        && !isInstitutionName(lowerCand)
+                        && candidate.length() >= 5 && candidate.length() <= 60) {
+                    return candidate;
+                }
+            }
+        }
+        // 2. Extract Prénom + Nom from label lines, skipping institution names
+        String prenom = null, nom = null;
+        for (String line : lines) {
+            if (prenom == null) {
+                Matcher pm = Pattern.compile("(?i)pr[eé]nom\\s*[:\\s]+([A-ZÀÂÉÈÊÎÔÙÛÇ][A-Za-zÀ-ÿ\\-]+)").matcher(line);
+                if (pm.find()) {
+                    String candidate = pm.group(1).trim();
+                    if (!isInstitutionName(candidate.toLowerCase())) prenom = candidate;
+                }
+            }
+            if (nom == null) {
+                // "Nom :" only — require colon to avoid matching "Nombre", "Nominal", etc.
+                Matcher nm = Pattern.compile("(?i)\\bnom\\s*:\\s*([A-ZÀÂÉÈÊÎÔÙÛÇ][A-Za-zÀ-ÿ\\-]+)").matcher(line);
+                if (nm.find()) {
+                    String candidate = nm.group(1).trim();
+                    if (!isInstitutionName(candidate.toLowerCase())) nom = candidate;
+                }
+            }
+        }
+        if (prenom != null && nom != null) return prenom + " " + nom;
+        if (prenom != null) return prenom;
+        if (nom != null) return nom;
+        return null;
+    }
+
+    private boolean isInstitutionName(String lowerName) {
+        return NOT_EMPLOYEE_KEYWORDS.stream().anyMatch(lowerName::contains);
+    }
+
+    // ── Période ───────────────────────────────────────────────────────────────
+
+    private static final String[] MOIS_FR = {
+        "", "Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
+        "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"
+    };
+
+    private String extractPeriode(String text, String[] lines) {
+        // 1. Explicit month name: "novembre 2025" / "Novembre 2025"
+        Matcher m = Pattern.compile("(?i)(janvier|f[eé]vrier|mars|avril|mai|juin|juillet|ao[uû]t|septembre|octobre|novembre|d[eé]cembre)\\s+(20\\d{2})").matcher(text);
+        if (m.find()) return capitalize(m.group(1)) + " " + m.group(2);
+
+        // 2. Range "du DD-MM-YYYY au DD-MM-YYYY" or "du DD/MM/YYYY au DD/MM/YYYY"
+        //    Handles: "du 01-07-2021 au 31-07-2021" (common in iText payslips)
+        m = Pattern.compile("(?i)du\\s+\\d{1,2}[-/.]\\d{1,2}[-/.](\\d{4})\\s+au\\s+\\d{1,2}[-/.](\\d{2})[-/.](\\d{4})").matcher(text);
+        if (m.find()) return monthNumberToName(m.group(2)) + " " + m.group(3);
+
+        // 3. "Période : du 01/11/2025" label
+        m = Pattern.compile("(?i)p[eé]riode[^\\n]{0,30}du\\s+(\\d{1,2})[-/.]+(\\d{2})[-/.]+(\\d{4})").matcher(text);
+        if (m.find()) return monthNumberToName(m.group(2)) + " " + m.group(3);
+
+        // 4. "Salaire versé le 30/07/2021" or "Date de paiement 31-07-2021"
+        m = Pattern.compile("(?i)(?:salaire\\s+vers[eé]|paiement|date\\s+de\\s+virement)\\s+le\\s+(\\d{1,2})[-/.]+(\\d{2})[-/.]+(\\d{4})").matcher(text);
+        if (m.find()) return monthNumberToName(m.group(2)) + " " + m.group(3);
+
+        // 5. Last resort: any "au 31-MM-YYYY" end-of-period marker
+        m = Pattern.compile("au\\s+(?:28|29|30|31)[-/.]?(\\d{2})[-/.](\\d{4})").matcher(text);
+        if (m.find()) return monthNumberToName(m.group(1)) + " " + m.group(2);
+
+        return null;
+    }
+
+    private String monthNumberToName(String monthNum) {
+        try {
+            int n = Integer.parseInt(monthNum);
+            if (n >= 1 && n <= 12) return MOIS_FR[n];
+        } catch (NumberFormatException ignored) {}
+        return monthNum;
+    }
+
+    private String capitalize(String s) {
+        if (s == null || s.isEmpty()) return s;
+        return s.substring(0, 1).toUpperCase() + s.substring(1).toLowerCase();
+    }
+
+    // ── Amount near label ─────────────────────────────────────────────────────
+
+    /**
+     * Finds the best monetary amount near a label (diacritic-insensitive match).
+     * Scans 1 line before + same line + up to 4 following lines, returns the LARGEST amount.
+     * Scanning before handles PDFs where the value is extracted before the label text
+     * due to right-column-first ordering. "Largest" avoids small incidental numbers.
+     */
+    private String extractAmountNearLabel(String[] lines, String... labels) {
+        String bestRaw = null;
+        double bestVal = -1;
+
+        for (int i = 0; i < lines.length; i++) {
+            String norm = normalizeDiacritics(lines[i]);
+            boolean labelFound = false;
+            for (String label : labels) {
+                if (norm.contains(label)) { labelFound = true; break; }
+            }
+            if (!labelFound) continue;
+
+            for (int j = Math.max(0, i - 1); j <= Math.min(i + 4, lines.length - 1); j++) {
+                String candidate = findLargestMonetaryAmount(lines[j]);
+                if (candidate != null) {
+                    double val = parseAmount(candidate);
+                    if (val > bestVal) { bestVal = val; bestRaw = candidate; }
+                }
+            }
+        }
+        return bestRaw != null ? bestRaw + " €" : null;
+    }
+
+    private String normalizeDiacritics(String text) {
+        return Normalizer.normalize(text.toLowerCase(), Normalizer.Form.NFD)
+            .replaceAll("[\\p{InCombiningDiacriticalMarks}]", "");
+    }
+
+    /** Returns the LARGEST monetary amount (100–200000) found in the line. */
+    private String findLargestMonetaryAmount(String text) {
+        Matcher m = Pattern.compile("([0-9]{1,3}(?:[\\s\u00a0][0-9]{3})*(?:[.,][0-9]{1,2})?)").matcher(text);
+        String best = null;
+        double bestVal = -1;
+        while (m.find()) {
+            String raw = m.group(1).replaceAll("[\\s\u00a0]", "").replace(",", ".");
+            try {
+                double val = Double.parseDouble(raw);
+                if (val >= 100 && val <= 200000 && val > bestVal) { bestVal = val; best = m.group(1).trim(); }
+            } catch (NumberFormatException ignored) {}
+        }
+        return best;
+    }
+
+    private double parseAmount(String formatted) {
+        if (formatted == null) return -1;
+        try { return Double.parseDouble(formatted.replaceAll("[\\s\u00a0€]", "").replace(",", ".")); }
+        catch (Exception e) { return -1; }
+    }
+
+    /**
+     * Extracts the first plausible salary amount (100–200000) from a line of text.
+     */
+    private String findMonetaryAmount(String text) {
+        // Match numbers like "3 224,64" or "3224.64" or "3224,64" or "3 224.64"
+        Matcher m = Pattern.compile("([0-9]{1,3}(?:[\\s\u00a0][0-9]{3})*(?:[.,][0-9]{1,2})?)").matcher(text);
+        while (m.find()) {
+            String raw = m.group(1).replaceAll("[\\s\u00a0]", "").replace(",", ".");
+            try {
+                double val = Double.parseDouble(raw);
+                if (val >= 100 && val <= 200000) return m.group(1).trim();
+            } catch (NumberFormatException ignored) {}
+        }
+        return null;
+    }
+
+    // ── SIRET ─────────────────────────────────────────────────────────────────
 
     private String extractSiret(String text) {
-        Matcher m = Pattern.compile("(?i)siret[\\s:]*([0-9]{14}|[0-9]{3}\\s[0-9]{3}\\s[0-9]{3}\\s[0-9]{5})").matcher(text);
-        if (m.find()) return m.group(1).replaceAll("\\s", "");
-        // Try raw 14-digit number
-        m = Pattern.compile("\\b([0-9]{14})\\b").matcher(text);
+        // Priorité 1 : label SIRET explicite — couvre :
+        //   "SIRET : 123 456 789 01234"
+        //   "N° SIRET : 12345678901234"
+        //   "SIRET-123 456 789 01234"
+        //   "N°SIRET123456789 01234"
+        Matcher m = Pattern.compile(
+            "(?i)(?:n[o°°]?\\s*)?siret\\s*[:=\\-\\s]+"
+            + "([0-9]{3}[\\s\u00a0]?[0-9]{3}[\\s\u00a0]?[0-9]{3}[\\s\u00a0]?[0-9]{5})"
+        ).matcher(text);
+        while (m.find()) {
+            String cleaned = m.group(1).replaceAll("[\\s\u00a0]", "");
+            if (cleaned.length() == 14) return cleaned;
+        }
+        // Priorité 2 : label SIREN + 14 chiffres (certains bulletins marquent "SIREN")
+        m = Pattern.compile(
+            "(?i)siren\\s*[:=\\-\\s]+"
+            + "([0-9]{3}[\\s\u00a0]?[0-9]{3}[\\s\u00a0]?[0-9]{3}[\\s\u00a0]?[0-9]{5})"
+        ).matcher(text);
+        while (m.find()) {
+            String cleaned = m.group(1).replaceAll("[\\s\u00a0]", "");
+            if (cleaned.length() == 14) return cleaned;
+        }
+        // Priorité 3 : 14 chiffres consécutifs isolés (dernier recours)
+        m = Pattern.compile("(?<![0-9])([0-9]{14})(?![0-9])").matcher(text);
         if (m.find()) return m.group(1);
-        return null;
-    }
-
-    private String extractMontant(String text, String regex) {
-        try {
-            Matcher m = Pattern.compile(regex).matcher(text);
-            if (m.find() && m.groupCount() >= 2) {
-                String raw = m.group(2).trim().replaceAll("\\s", "");
-                return raw + " €";
-            }
-        } catch (Exception ignored) {}
+        // Priorité 4 : format espacé XXX XXX XXX XXXXX isolé
+        m = Pattern.compile(
+            "(?<![0-9])([0-9]{3}[\\s\u00a0][0-9]{3}[\\s\u00a0][0-9]{3}[\\s\u00a0][0-9]{5})(?![0-9])"
+        ).matcher(text);
+        if (m.find()) return m.group(1).replaceAll("[\\s\u00a0]", "");
         return null;
     }
 }

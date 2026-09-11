@@ -23,7 +23,7 @@ public class AiAnalysisService {
     private String model;
 
     private static final String OPENAI_URL = "https://api.openai.com/v1/chat/completions";
-    private static final int MAX_TEXT_LENGTH = 3000;
+    private static final int MAX_TEXT_LENGTH = 6000;
 
     private final RestTemplate restTemplate = new RestTemplate();
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -47,12 +47,8 @@ public class AiAnalysisService {
             return parseResponse(jsonResponse);
 
         } catch (Exception e) {
-            return List.of(AnalysisResult.Check.builder()
-                .category("Analyse IA")
-                .label("GPT-4 indisponible")
-                .status("WARNING")
-                .detail("L'analyse IA n'a pas pu être effectuée : " + e.getMessage())
-                .build());
+            System.err.println("[AI] Analyse IA indisponible : " + e.getMessage());
+            return List.of(); // no penalty for unavailable AI service
         }
     }
 
