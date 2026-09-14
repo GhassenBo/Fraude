@@ -54,8 +54,10 @@ public class SalaryCalculationService {
         // Sur la ligne de total, la part salariale precede la part patronale :
         // on prend donc le premier montant, pas le plus grand.
         Double totalCotisations = extractFirstAmountOnSameLine(lines,
-            "total des cotisations et contributions", "montant total des cotisations",
+            "total cotisations et contributions salariales",
+            "total des cotisations et contributions salariales",
             "total cotisations salariales", "total retenues salariales",
+            "total des cotisations et contributions", "montant total des cotisations",
             "total des cotisations", "total prelevements salariales",
             "total charges salariales");
 
@@ -151,6 +153,7 @@ public class SalaryCalculationService {
         // se retire au net apres cotisations. Interessement, titres-restaurant ou
         // remboursements de frais la rendent fausse sans qu'il y ait anomalie.
         boolean netHorsBrut = containsElementsHorsBrut(text);
+        boolean exonere = isContratExonere(text);
         if (salaireBrut != null && netForCotisCheck != null && totalCotisations != null
                 && !netHorsBrut) {
             double expectedDiff = salaireBrut - netForCotisCheck;
@@ -178,8 +181,14 @@ public class SalaryCalculationService {
                 checks.add(AnalysisResult.Check.builder()
                     .category("Calculs")
                     .label("Comparaison SMIC")
-                    .status("WARNING")
-                    .detail(String.format("Salaire brut %.2f€ inférieur au SMIC mensuel (%.2f€) — vérifier si temps partiel, mois incomplet, apprenti ou stage", salaireBrut, SMIC_MENSUEL))
+                    .status(exonere ? "OK" : "WARNING")
+                    .detail(exonere
+                        ? String.format("Salaire brut %.2f€ sous le SMIC (%.2f€) — normal en"
+                            + " alternance, la rémunération est un pourcentage légal du SMIC",
+                            salaireBrut, SMIC_MENSUEL)
+                        : String.format("Salaire brut %.2f€ inférieur au SMIC mensuel (%.2f€)"
+                            + " — vérifier si temps partiel, mois incomplet, apprenti ou stage",
+                            salaireBrut, SMIC_MENSUEL))
                     .build());
             } else if (salaireBrut > 50000) {
                 checks.add(AnalysisResult.Check.builder()
@@ -206,7 +215,7 @@ public class SalaryCalculationService {
         // Sinon, fallback sur le regex netAvantImpot, puis sur netFinal si rien d'autre.
         Double netForCcn = (visionEnabled && salaireNet != null) ? salaireNet
             : (netAvantImpot != null ? netAvantImpot : salaireNet);
-        AnalysisResult.Check ratioCcn = checkNetBrutRatio(salaireBrut, netForCcn, text, totalCotisations);
+        AnalysisResult.Check ratioCcn = checkNetBrutRatio(salaireBrut, netForCcn, text, totalCotisations, exonere);
         if (ratioCcn != null) checks.add(ratioCcn);
 
         // Check 6: Somme individuelle des lignes de cotisations
@@ -282,9 +291,30 @@ public class SalaryCalculationService {
     }
 
     private Double extractCumulBrut(String[] lines) {
-        return extractAmountNearLabel(lines,
+        Double sameLine = extractFirstAmountOnSameLine(lines,
             "cumul brut", "brut cumul", "cumule brut", "brut cumule",
             "total brut cumul", "cumul du brut", "brut annuel");
+        if (sameLine != null) return sameLine;
+        return extractCumulPhrase(lines);
+    }
+
+    // Certains editeurs rendent les cumuls en phrase :
+    // "Depuis le 1er janvier 2026 : Bruts 5 560,25, Heures travaillees 760..."
+    private static final Pattern CUMUL_PHRASE = Pattern.compile(
+        "(?i)bruts?\\s*:?\\s*((?:[0-9]{1,3}(?:[\\s\u00a0][0-9]{3})+|[0-9]+)[.,][0-9]{2})");
+
+    private Double extractCumulPhrase(String[] lines) {
+        for (String line : lines) {
+            if (!normalizeDiacritics(line).contains("depuis le")) continue;
+            Matcher m = CUMUL_PHRASE.matcher(line);
+            if (m.find()) {
+                try {
+                    return Double.parseDouble(
+                        m.group(1).replaceAll("[\\s\u00a0]", "").replace(",", "."));
+                } catch (NumberFormatException ignored) {}
+            }
+        }
+        return null;
     }
 
     private static final String[] MOIS_NOMS = {
@@ -443,8 +473,18 @@ public class SalaryCalculationService {
      * Plages basées sur les charges salariales françaises 2024 (régime général).
      */
     private AnalysisResult.Check checkNetBrutRatio(Double brut, Double net, String text,
-                                                   Double totalCotisations) {
+                                                   Double totalCotisations, boolean exonere) {
         if (brut == null || brut <= 0) return null;
+
+        if (exonere) {
+            return AnalysisResult.Check.builder()
+                .category("Calculs")
+                .label("Ratio Net/Brut CCN")
+                .status("OK")
+                .detail("Contrat en alternance : l'exonération de cotisations salariales"
+                    + " rend le ratio Net/Brut non comparable à une plage conventionnelle")
+                .build();
+        }
 
         // Le net inclut des elements hors brut (interessement, participation, frais,
         // IJSS) et le ratio net/brut depasse alors la plage conventionnelle sans
@@ -636,7 +676,20 @@ public class SalaryCalculationService {
         return extractAmountNearLabel(lines, labels);
     }
 
+    // Apprentis et contrats de professionnalisation sont exoneres de cotisations
+    // salariales : net egal au brut et remuneration en pourcentage du SMIC sont
+    // alors normaux, et non des anomalies.
+    private static final List<String> CONTRATS_EXONERES = List.of(
+        "contrat d apprentissage", "contrat d'apprentissage", "apprenti",
+        "contrat de professionnalisation", "professionnalisation");
+
+    private boolean isContratExonere(String text) {
+        String norm = normalizeDiacritics(text);
+        return CONTRATS_EXONERES.stream().anyMatch(norm::contains);
+    }
+
     private static final List<String> ELEMENTS_HORS_BRUT = List.of(
+        "avantage en nature", "avantages en nature",
         "interessement", "participation", "titres-restaurant", "titre restaurant",
         "ticket restaurant", "remboursement de frais", "frais professionnels",
         "note de frais", "acompte", "avance sur salaire", "saisie sur salaire",

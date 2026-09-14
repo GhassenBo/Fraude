@@ -614,4 +614,70 @@ class SalaryCalculationServiceTest {
 
         assertThat(checks).noneMatch(c -> "Cohérence des cotisations".equals(c.getLabel()));
     }
+
+    // ── Cas observes sur bulletins reels (valeurs anonymisees) ───────────────
+
+    @Test
+    void alternance_ratioEtSmic_neSontPasDesAnomalies() {
+        // Apprenti : cotisations salariales nulles, donc net = brut et
+        // remuneration sous le SMIC. Les deux sont legaux.
+        String text = "Contrat : Contrat d'apprentissage\n"
+            + "Remuneration brute 1 112,05\n"
+            + "Total cotisations et contributions salariales 0,00\n"
+            + "NET A PAYER AVANT IMPOT SUR LE REVENU 1 112,05\n"
+            + "siret\ncotisation\nconges payes\nconvention collective";
+
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(text, null, false);
+
+        assertThat(findCheck(checks, "Ratio Net/Brut CCN").getStatus()).isEqualTo("OK");
+        assertThat(findCheck(checks, "Comparaison SMIC").getStatus()).isEqualTo("OK");
+        assertThat(findCheck(checks, "Comparaison SMIC").getDetail()).contains("alternance");
+    }
+
+    @Test
+    void avantagesEnNature_neFaussentPasLeCheckCotisations() {
+        // Les avantages en nature sont ajoutes au brut pour etre cotises puis
+        // retires du net : brut - net = cotisations est faux de leur montant.
+        String text = "Avantage en nature : Vehicule 250,00\n"
+            + "Remuneration brute 4 800,00\n"
+            + "Total cotisations et contributions salariales 998,75\n"
+            + "NET A PAYER AVANT IMPOT SUR LE REVENU 3 501,25\n"
+            + "siret\ncotisation\nconges payes\nconvention collective";
+
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(text, null, false);
+
+        assertThat(checks).noneMatch(c -> "Cohérence des cotisations".equals(c.getLabel()));
+        assertThat(findCheck(checks, "Ratio Net/Brut CCN").getStatus()).isEqualTo("OK");
+    }
+
+    @Test
+    void cumulEnFormatPhrase_estExtrait() {
+        // Certains editeurs rendent les cumuls en phrase plutot qu'en ligne dediee.
+        String text = "Remuneration brute 2 857,16\n"
+            + "Total cotisations et contributions salariales 599,44\n"
+            + "Depuis le 1er janvier 2026 : Bruts 11 428,64, Heures travaillees 608.\n"
+            + "siret\ncotisation\nconges payes\nconvention collective";
+
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(text, null, false);
+
+        AnalysisResult.Check check = findCheck(checks, "Cumuls annuels");
+        assertThat(check.getStatus()).isEqualTo("OK");
+        assertThat(check.getDetail()).contains("11428.64");
+    }
+
+    @Test
+    void totalCotisations_prendLaPartSalarialePasLaPatronale() {
+        // La part salariale precede la patronale ; retenir la plus grande
+        // fausserait le taux de charge.
+        String text = "Remuneration brute 3 200,00\n"
+            + "Total cotisations et contributions salariales 672,14\n"
+            + "Total cotisations et contributions patronales 1 339,26\n"
+            + "NET A PAYER AVANT IMPOT SUR LE REVENU 2 527,86\n"
+            + "siret\ncotisation\nconges payes\nconvention collective";
+
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(text, null, false);
+
+        // (3200 - 672,14) / 3200 = 79,0 % ; avec la part patronale on aurait obtenu 58 %
+        assertThat(findCheck(checks, "Ratio Net/Brut CCN").getDetail()).contains("79.0%");
+    }
 }
