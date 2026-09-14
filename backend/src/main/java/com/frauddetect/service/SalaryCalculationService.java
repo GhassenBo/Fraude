@@ -14,6 +14,11 @@ public class SalaryCalculationService {
     private static final double SMIC_MENSUEL = 1766.92;
     private static final double SMIC_HORAIRE = 11.65;
 
+    // Montants : "12 000,00" (separateur de milliers) ou "9000,00" (sans separateur).
+    // La partie decimale est obligatoire pour ne pas capturer les annees et codes.
+    private static final Pattern AMOUNT_PATTERN = Pattern.compile(
+        "(?<![0-9.,])([0-9]{1,3}(?:[\\s\u00a0][0-9]{3})+|[0-9]+)[.,]([0-9]{2})(?![0-9])");
+
     // Approximate charge rates
     private static final double CHARGES_SALARIALES_MIN = 0.20;
     private static final double CHARGES_SALARIALES_MAX = 0.30;
@@ -208,7 +213,96 @@ public class SalaryCalculationService {
         AnalysisResult.Check pasCheck = checkPAS(netAvantPasForCheck, montantPAS, netFinalApresPas);
         if (pasCheck != null) checks.add(pasCheck);
 
+        // Check 8: Cohérence des cumuls annuels
+        AnalysisResult.Check cumulCheck = checkCumuls(lines, salaireBrut, docInfo);
+        if (cumulCheck != null) checks.add(cumulCheck);
+
         return checks;
+    }
+
+    // ── Check 8 : Cohérence des cumuls annuels ────────────────────────────────
+
+    /**
+     * Un faussaire qui gonfle le brut d'un mois oublie presque toujours de
+     * recalculer les cumuls. On ne teste que les relations mathematiquement
+     * certaines : le cumul inclut le mois courant, donc cumul >= brut du mois.
+     * Toute borne superieure serait un faux positif (primes, 13e mois), et toute
+     * borne inferieure liee au numero de mois aussi (embauche en cours d'annee).
+     */
+    private AnalysisResult.Check checkCumuls(String[] lines, Double brut,
+                                             AnalysisResult.DocumentInfo docInfo) {
+        String periode = docInfo != null ? docInfo.getPeriode() : null;
+        Double cumulBrut = extractCumulBrut(lines);
+        Integer moisPeriode = moisDePeriode(periode);
+
+        if (docInfo != null) {
+            docInfo.setCumulBrut(cumulBrut);
+            docInfo.setMoisPeriode(moisPeriode);
+        }
+
+        if (cumulBrut == null || brut == null || brut <= 0) return null;
+
+        String category = "Calculs";
+        String label = "Cumuls annuels";
+
+        if (cumulBrut < brut - 1.0) {
+            return AnalysisResult.Check.builder()
+                .category(category).label(label).status("FAILED")
+                .detail(String.format(
+                    "Cumul brut annuel (%.2f €) inférieur au brut du mois (%.2f €)"
+                        + " — impossible, le cumul inclut le mois courant",
+                    cumulBrut, brut))
+                .build();
+        }
+
+        if (moisPeriode != null && moisPeriode > 1 && Math.abs(cumulBrut - brut) < 1.0) {
+            return AnalysisResult.Check.builder()
+                .category(category).label(label).status("WARNING")
+                .detail(String.format(
+                    "Cumul brut annuel identique au brut du mois (%.2f €) alors que la période"
+                        + " est le mois %d — cohérent seulement en cas d'embauche ce mois-ci",
+                    cumulBrut, moisPeriode))
+                .build();
+        }
+
+        return AnalysisResult.Check.builder()
+            .category(category).label(label).status("OK")
+            .detail(String.format("Cumul brut annuel cohérent : %.2f € pour un brut mensuel de %.2f €",
+                cumulBrut, brut))
+            .build();
+    }
+
+    private Double extractCumulBrut(String[] lines) {
+        return extractAmountNearLabel(lines,
+            "cumul brut", "brut cumul", "cumule brut", "brut cumule",
+            "total brut cumul", "cumul du brut", "brut annuel");
+    }
+
+    private static final String[] MOIS_NOMS = {
+        "janvier", "fevrier", "mars", "avril", "mai", "juin",
+        "juillet", "aout", "septembre", "octobre", "novembre", "decembre"
+    };
+
+    Integer moisDePeriode(String periode) {
+        if (periode == null || periode.isBlank()) return null;
+        String norm = normalizeDiacritics(periode);
+
+        for (int i = 0; i < MOIS_NOMS.length; i++) {
+            if (norm.contains(MOIS_NOMS[i])) return i + 1;
+        }
+
+        // Formats numeriques : 03/2026, 2026-03, 01/03/2026
+        Matcher m = Pattern.compile("\\b(\\d{1,2})\\s*[/-]\\s*(\\d{4})\\b").matcher(norm);
+        if (m.find()) {
+            int val = Integer.parseInt(m.group(1));
+            if (val >= 1 && val <= 12) return val;
+        }
+        m = Pattern.compile("\\b(\\d{4})\\s*[/-]\\s*(\\d{1,2})\\b").matcher(norm);
+        if (m.find()) {
+            int val = Integer.parseInt(m.group(2));
+            if (val >= 1 && val <= 12) return val;
+        }
+        return null;
     }
 
     /** Parses a DocumentInfo amount string like "4249.60 €" or "4 249,60 €" to a Double. */
@@ -527,10 +621,10 @@ public class SalaryCalculationService {
 
     /** Returns the LAST plausible salary amount (10–50000) found in a single line. */
     private Double lastAmountInLine(String line) {
-        Matcher m = Pattern.compile("([0-9]{1,3}(?:[\\s ][0-9]{3})*[.,][0-9]{2})").matcher(line);
+        Matcher m = AMOUNT_PATTERN.matcher(line);
         Double last = null;
         while (m.find()) {
-            String raw = m.group(1).replaceAll("[\\s ]", "").replace(",", ".");
+            String raw = m.group().replaceAll("[\\s ]", "").replace(",", ".");
             try {
                 double val = Double.parseDouble(raw);
                 if (val >= 10 && val <= 50000) last = val;
@@ -542,10 +636,10 @@ public class SalaryCalculationService {
     /** Returns the LARGEST plausible salary amount (100–200 000) found in a single line. */
     /** Returns the LARGEST plausible salary amount (100\u2013200 000) found in a single line. Requires decimal part to avoid capturing years/codes. */
     private Double largestAmountInLine(String line) {
-        Matcher m = Pattern.compile("([0-9]{1,3}(?:[\\s\u00a0][0-9]{3})*[.,][0-9]{2})").matcher(line);
+        Matcher m = AMOUNT_PATTERN.matcher(line);
         Double best = null;
         while (m.find()) {
-            String raw = m.group(1).replaceAll("[\\s\u00a0]", "").replace(",", ".");
+            String raw = m.group().replaceAll("[\\s\u00a0]", "").replace(",", ".");
             try {
                 double val = Double.parseDouble(raw);
                 if (val >= 100 && val <= 200000 && (best == null || val > best)) best = val;

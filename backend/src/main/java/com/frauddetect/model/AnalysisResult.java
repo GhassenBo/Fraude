@@ -34,6 +34,11 @@ public class AnalysisResult {
         private String periode;
         private String salaireBrut;
         private String salaireNet;
+        // Renseignes par SalaryCalculationService : servent au recoupement
+        // des cumuls entre plusieurs bulletins d'une meme analyse par lot.
+        private Double cumulBrut;
+        private Integer moisPeriode;
+
         private String pdfCreatedWith;
         private String pdfCreationDate;
         private String pdfModifiedDate;

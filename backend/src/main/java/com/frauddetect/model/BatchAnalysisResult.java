@@ -13,4 +13,8 @@ public class BatchAnalysisResult {
     private int documentsAnalyzed;
     private List<AnalysisResult> results;
     private List<String> filenames;
+
+    // Controles impossibles sur un document isole : recoupement des cumuls
+    // entre bulletins consecutifs du meme lot.
+    private List<AnalysisResult.Check> crossChecks;
 }

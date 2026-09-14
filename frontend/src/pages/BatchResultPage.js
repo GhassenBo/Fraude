@@ -49,6 +49,25 @@ export default function BatchResultPage({ batchResult, onReset, onUpgrade }) {
         ))}
       </div>
 
+      {batchResult.crossChecks?.length > 0 && (
+        <>
+          <h2 className="batch-section-title">Recoupement entre bulletins</h2>
+          <div className="batch-cross">
+            {batchResult.crossChecks.map((check, i) => (
+              <div key={i} className={`cross-check cross-${(check.status || '').toLowerCase()}`}>
+                <span className="cross-icon">
+                  {check.status === 'OK' ? '✓' : check.status === 'WARNING' ? '!' : '✕'}
+                </span>
+                <div className="cross-body">
+                  <strong>{check.label}</strong>
+                  <span>{check.detail}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
       {/* Document cards */}
       <h2 className="batch-section-title">Résultats par document</h2>
       <div className="batch-docs">

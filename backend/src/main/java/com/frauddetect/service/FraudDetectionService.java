@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -105,7 +106,13 @@ public class FraudDetectionService {
             filenames.add(file.getOriginalFilename());
         }
 
+        List<AnalysisResult.Check> crossChecks = checkCumulProgression(results);
+
         int globalScore = results.stream().mapToInt(AnalysisResult::getScore).min().orElse(0);
+        if (crossChecks.stream().anyMatch(c -> "FAILED".equals(c.getStatus()))) {
+            globalScore = Math.min(globalScore, 40);
+        }
+
         return BatchAnalysisResult.builder()
             .globalScore(globalScore)
             .globalVerdict(computeVerdict(globalScore))
@@ -113,7 +120,76 @@ public class FraudDetectionService {
             .documentsAnalyzed(count)
             .results(results)
             .filenames(filenames)
+            .crossChecks(crossChecks)
             .build();
+    }
+
+    /**
+     * Sur des bulletins consecutifs, le cumul brut progresse exactement du brut
+     * du mois : cumul(N) - cumul(N-1) = brut(N). C'est l'egalite la plus difficile
+     * a falsifier, un faussaire mettant rarement les cumuls a jour de facon coherente.
+     * On ne compare que des mois consecutifs de la meme annee et on exige que
+     * toutes les valeurs soient disponibles.
+     */
+    private List<AnalysisResult.Check> checkCumulProgression(List<AnalysisResult> results) {
+        List<AnalysisResult> usable = results.stream()
+            .filter(r -> r.getDocumentInfo() != null
+                && r.getDocumentInfo().getCumulBrut() != null
+                && r.getDocumentInfo().getMoisPeriode() != null)
+            .sorted(Comparator.comparingInt(r -> r.getDocumentInfo().getMoisPeriode()))
+            .toList();
+
+        if (usable.size() < 2) return List.of();
+
+        List<AnalysisResult.Check> checks = new ArrayList<>();
+        for (int i = 1; i < usable.size(); i++) {
+            AnalysisResult prev = usable.get(i - 1);
+            AnalysisResult curr = usable.get(i);
+
+            int moisPrev = prev.getDocumentInfo().getMoisPeriode();
+            int moisCurr = curr.getDocumentInfo().getMoisPeriode();
+            if (moisCurr - moisPrev != 1) continue;
+
+            Double brutCurr = parseAmount(curr.getDocumentInfo().getSalaireBrut());
+            if (brutCurr == null) continue;
+
+            double progression = curr.getDocumentInfo().getCumulBrut()
+                - prev.getDocumentInfo().getCumulBrut();
+            double ecart = Math.abs(progression - brutCurr);
+
+            String periodes = "mois " + moisPrev + " → " + moisCurr;
+            if (ecart > 1.0) {
+                checks.add(AnalysisResult.Check.builder()
+                    .category("Recoupement")
+                    .label("Progression des cumuls (" + periodes + ")")
+                    .status("FAILED")
+                    .detail(String.format(
+                        "Le cumul brut progresse de %.2f € alors que le brut du mois est de %.2f €"
+                            + " (écart de %.2f €) — les cumuls n'ont pas été recalculés",
+                        progression, brutCurr, ecart))
+                    .build());
+            } else {
+                checks.add(AnalysisResult.Check.builder()
+                    .category("Recoupement")
+                    .label("Progression des cumuls (" + periodes + ")")
+                    .status("OK")
+                    .detail(String.format("Progression du cumul brut (%.2f €) conforme au brut du mois",
+                        progression))
+                    .build());
+            }
+        }
+        return checks;
+    }
+
+    private Double parseAmount(String amount) {
+        if (amount == null) return null;
+        String cleaned = amount.replaceAll("[^0-9,.]", "").replace(",", ".");
+        if (cleaned.isBlank()) return null;
+        try {
+            return Double.parseDouble(cleaned);
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     public List<Analysis> getHistory(User user) {

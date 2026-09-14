@@ -281,3 +281,25 @@
   .batch-stats { grid-template-columns: repeat(2, 1fr); }
   .mini-label { min-width: 120px; }
 }
+
+/* ── Recoupement entre bulletins ── */
+.batch-cross { display: flex; flex-direction: column; gap: 10px; margin-bottom: 32px; }
+.cross-check {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 14px 16px; border-radius: 8px;
+  background: var(--bg2); border: 1px solid var(--border);
+}
+.cross-check.cross-ok { border-color: rgba(0,255,135,0.3); }
+.cross-check.cross-warning { border-color: rgba(255,153,0,0.4); background: rgba(255,153,0,0.06); }
+.cross-check.cross-failed { border-color: rgba(255,51,102,0.45); background: rgba(255,51,102,0.07); }
+.cross-icon {
+  flex-shrink: 0; width: 20px; height: 20px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700;
+}
+.cross-ok .cross-icon { background: rgba(0,255,135,0.15); color: var(--green); }
+.cross-warning .cross-icon { background: rgba(255,153,0,0.18); color: var(--orange); }
+.cross-failed .cross-icon { background: rgba(255,51,102,0.18); color: var(--red); }
+.cross-body { display: flex; flex-direction: column; gap: 3px; }
+.cross-body strong { font-size: 13px; color: var(--text); }
+.cross-body span { font-size: 13px; color: var(--text-muted); line-height: 1.5; }

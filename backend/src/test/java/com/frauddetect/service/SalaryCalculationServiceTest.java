@@ -461,4 +461,95 @@ class SalaryCalculationServiceTest {
             .anyMatch(c -> "Somme des cotisations".equals(c.getLabel()));
         assertThat(hasCotisSum).isFalse();
     }
+
+    // ── Cumuls annuels ────────────────────────────────────────────────────────
+
+    private AnalysisResult.DocumentInfo docInfoPeriode(String brut, String net, String periode) {
+        return AnalysisResult.DocumentInfo.builder()
+            .salaireBrut(brut).salaireNet(net).periode(periode).build();
+    }
+
+    @Test
+    void cumuls_inferieurAuBrutDuMois_shouldFail() {
+        String text = "cumul brut 1200,00\nnet a payer\nsiret\ncotisation\nconvention collective";
+
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(
+            text, docInfoPeriode("3000.00 €", "2300.00 €", "Mars 2026"), true);
+
+        AnalysisResult.Check check = findCheck(checks, "Cumuls annuels");
+        assertThat(check.getStatus()).isEqualTo("FAILED");
+        assertThat(check.getDetail()).contains("impossible");
+    }
+
+    @Test
+    void cumuls_coherent_shouldBeOK() {
+        String text = "cumul brut 9000,00\nnet a payer\nsiret\ncotisation\nconvention collective";
+
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(
+            text, docInfoPeriode("3000.00 €", "2300.00 €", "Mars 2026"), true);
+
+        assertThat(findCheck(checks, "Cumuls annuels").getStatus()).isEqualTo("OK");
+    }
+
+    @Test
+    void cumuls_egalAuBrutEnMarch_shouldWarn() {
+        String text = "cumul brut 3000,00\nnet a payer\nsiret\ncotisation\nconvention collective";
+
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(
+            text, docInfoPeriode("3000.00 €", "2300.00 €", "Mars 2026"), true);
+
+        AnalysisResult.Check check = findCheck(checks, "Cumuls annuels");
+        assertThat(check.getStatus()).isEqualTo("WARNING");
+        assertThat(check.getDetail()).contains("embauche");
+    }
+
+    @Test
+    void cumuls_egalAuBrutEnJanvier_shouldBeOK() {
+        // En janvier le cumul est legitimement egal au brut du mois
+        String text = "cumul brut 3000,00\nnet a payer\nsiret\ncotisation\nconvention collective";
+
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(
+            text, docInfoPeriode("3000.00 €", "2300.00 €", "Janvier 2026"), true);
+
+        assertThat(findCheck(checks, "Cumuls annuels").getStatus()).isEqualTo("OK");
+    }
+
+    @Test
+    void cumuls_absent_checkSkipped() {
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(
+            "net a payer\nsiret\ncotisation\nconvention collective",
+            docInfoPeriode("3000.00 €", "2300.00 €", "Mars 2026"), true);
+
+        assertThat(checks).noneMatch(c -> "Cumuls annuels".equals(c.getLabel()));
+    }
+
+    @Test
+    void cumuls_renseigneDansDocumentInfo() {
+        AnalysisResult.DocumentInfo info = docInfoPeriode("3000.00 €", "2300.00 €", "Mars 2026");
+
+        service.analyzeCalculations(
+            "cumul brut 9000,00\nnet a payer\nsiret\ncotisation\nconvention collective", info, true);
+
+        assertThat(info.getCumulBrut()).isEqualTo(9000.00);
+        assertThat(info.getMoisPeriode()).isEqualTo(3);
+    }
+
+    // ── Extraction du mois de la periode ──────────────────────────────────────
+
+    @Test
+    void moisDePeriode_formatsReconnus() {
+        assertThat(service.moisDePeriode("Janvier 2026")).isEqualTo(1);
+        assertThat(service.moisDePeriode("Décembre 2026")).isEqualTo(12);
+        assertThat(service.moisDePeriode("fevrier 2026")).isEqualTo(2);
+        assertThat(service.moisDePeriode("03/2026")).isEqualTo(3);
+        assertThat(service.moisDePeriode("2026-07")).isEqualTo(7);
+    }
+
+    @Test
+    void moisDePeriode_formatsInvalides() {
+        assertThat(service.moisDePeriode(null)).isNull();
+        assertThat(service.moisDePeriode("")).isNull();
+        assertThat(service.moisDePeriode("periode de paie")).isNull();
+        assertThat(service.moisDePeriode("13/2026")).isNull();
+    }
 }
