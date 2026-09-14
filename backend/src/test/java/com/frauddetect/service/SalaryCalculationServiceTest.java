@@ -680,4 +680,55 @@ class SalaryCalculationServiceTest {
         // (3200 - 672,14) / 3200 = 79,0 % ; avec la part patronale on aurait obtenu 58 %
         assertThat(findCheck(checks, "Ratio Net/Brut CCN").getDetail()).contains("79.0%");
     }
+
+    // ── Detection de falsifications (scenarios de fraude courants) ───────────
+
+    private static final String BULLETIN_SAIN =
+        "Remuneration brute 3 200,00\n"
+        + "Total cotisations et contributions salariales 672,14\n"
+        + "MONTANT NET SOCIAL 2 527,86\n"
+        + "NET A PAYER AVANT IMPOT SUR LE REVENU 2 527,86\n"
+        + "siret\ncotisation\nconges payes\nconvention collective";
+
+    @Test
+    void bulletinSain_aucuneAlerte() {
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(
+            BULLETIN_SAIN, docInfo("3200.00", "2527.86"), true);
+
+        assertThat(checks).allMatch(c -> "OK".equals(c.getStatus()));
+    }
+
+    @Test
+    void netGonfle_detecte() {
+        // Fraude la plus courante : gonfler le net a payer pour un dossier
+        // de location ou de credit. Le net depasse alors le net social.
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(
+            BULLETIN_SAIN, docInfo("3200.00", "3327.86"), true);
+
+        assertThat(checks).anyMatch(c -> "FAILED".equals(c.getStatus()));
+    }
+
+    @Test
+    void cotisationsMinorees_detectees() {
+        // Reduire les cotisations pour justifier un net plus eleve fait
+        // chuter le taux de charge hors de la plage conventionnelle.
+        String text = BULLETIN_SAIN.replace(
+            "Total cotisations et contributions salariales 672,14",
+            "Total cotisations et contributions salariales 272,14");
+
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(
+            text, docInfo("3200.00", "2927.86"), true);
+
+        assertThat(findCheck(checks, "Ratio Net/Brut CCN").getStatus()).isEqualTo("FAILED");
+    }
+
+    @Test
+    void netSuperieurAuBrut_detecte() {
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(
+            BULLETIN_SAIN, docInfo("3200.00", "3400.00"), true);
+
+        AnalysisResult.Check check = findCheck(checks, "Ratio Net/Brut");
+        assertThat(check.getStatus()).isEqualTo("FAILED");
+        assertThat(check.getDetail()).contains("impossible");
+    }
 }
