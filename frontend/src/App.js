@@ -24,13 +24,30 @@ export default function App() {
     const verified = params.get('verified');
     if (verified === '1') {
       setNotice({ type: 'success', text: 'Adresse email confirmée. Vous pouvez lancer vos analyses.' });
-      if (getToken()) refreshMe().then(setUser).catch(() => {});
     } else if (verified === '0') {
       setNotice({ type: 'error', text: 'Lien invalide ou expiré. Demandez un nouvel email de confirmation.' });
     }
     if (verified) {
       window.history.replaceState({}, '', window.location.pathname);
     }
+
+    // Le compteur de documents et le statut de verification changent cote serveur
+    // (analyse, clic sur le lien de confirmation, parfois depuis un autre onglet).
+    if (getToken()) {
+      refreshMe().then(setUser).catch(() => {});
+    }
+  }, []);
+
+  // Le lien de confirmation est souvent ouvert dans un autre onglet : on resynchronise
+  // au retour sur celui-ci pour que le bandeau disparaisse sans rechargement manuel.
+  useEffect(() => {
+    const sync = () => {
+      if (document.visibilityState === 'visible' && getToken()) {
+        refreshMe().then(setUser).catch(() => {});
+      }
+    };
+    document.addEventListener('visibilitychange', sync);
+    return () => document.removeEventListener('visibilitychange', sync);
   }, []);
 
   const handleLogin = (userData) => {
@@ -49,6 +66,7 @@ export default function App() {
     setResult(data);
     setFilename(name);
     setPage('result');
+    refreshMe().then(setUser).catch(() => {});
     if (data.remainingDocuments === 0 && !data.isPro) {
       setTimeout(() => setPage('pricing'), 3000);
     }
