@@ -268,3 +268,129 @@
   transition: all 0.3s;
 }
 .qe-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(124,58,237,0.4); }
+
+
+/* ── Mode toggle ── */
+.mode-toggle {
+  display: flex;
+  gap: 4px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 4px;
+  margin-bottom: 20px;
+  width: fit-content;
+}
+
+.mode-btn {
+  padding: 8px 20px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mode-btn.active {
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+}
+
+.mode-badge {
+  font-size: 9px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(0,229,255,0.15);
+  color: var(--accent);
+}
+
+/* ── Batch zone ── */
+.batch-zone { width: 100%; }
+
+.batch-drop {
+  margin-bottom: 12px;
+}
+
+.batch-file-list {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.batch-list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.clear-all-btn {
+  background: none;
+  border: none;
+  color: var(--red);
+  font-size: 11px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+.clear-all-btn:hover { opacity: 1; }
+
+.batch-file-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  transition: background 0.15s;
+}
+.batch-file-item:last-child { border-bottom: none; }
+.batch-file-item:hover { background: rgba(255,255,255,0.02); }
+
+.batch-file-num {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.batch-file-name {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.batch-file-size {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+}

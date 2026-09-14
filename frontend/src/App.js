@@ -5,6 +5,7 @@ import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import DashboardPage from './pages/DashboardPage';
 import PricingPage from './pages/PricingPage';
+import BatchResultPage from './pages/BatchResultPage';
 import { getToken, getUser, logout, refreshMe, resendVerification } from './services/auth';
 import './App.css';
 
@@ -12,6 +13,7 @@ export default function App() {
   const [user, setUser] = useState(getUser());
   const [page, setPage] = useState('upload');
   const [result, setResult] = useState(null);
+  const [batchResult, setBatchResult] = useState(null);
   const [filename, setFilename] = useState('');
   const [notice, setNotice] = useState(null);
 
@@ -60,6 +62,7 @@ export default function App() {
     setUser(null);
     setPage('upload');
     setResult(null);
+    setBatchResult(null);
   };
 
   const handleResult = (data, name) => {
@@ -72,7 +75,13 @@ export default function App() {
     }
   };
 
-  const handleReset = () => { setResult(null); setPage('upload'); };
+  const handleBatchResult = (data) => {
+    setBatchResult(data);
+    setPage('batch-result');
+    refreshMe().then(setUser).catch(() => {});
+  };
+
+  const handleReset = () => { setResult(null); setBatchResult(null); setPage('upload'); };
 
   if (!user && page === 'upload') {
     return <div className="app"><Header user={user} onLogout={handleLogout} onNav={setPage} /><LoginPage onLogin={handleLogin} onRegister={() => setPage('register')} /></div>;
@@ -86,8 +95,9 @@ export default function App() {
       <Header user={user} onLogout={handleLogout} onNav={setPage} currentPage={page} />
       {notice && <Notice notice={notice} onClose={() => setNotice(null)} />}
       {user && !user.emailVerified && <VerifyBanner email={user.email} />}
-      {page === 'upload' && <UploadPage onResult={handleResult} user={user} onUpgrade={() => setPage('pricing')} />}
+      {page === 'upload' && <UploadPage onResult={handleResult} onBatchResult={handleBatchResult} user={user} onUpgrade={() => setPage('pricing')} />}
       {page === 'result' && <ResultPage result={result} filename={filename} onReset={handleReset} onUpgrade={() => setPage('pricing')} />}
+      {page === 'batch-result' && <BatchResultPage batchResult={batchResult} onReset={handleReset} onUpgrade={() => setPage('pricing')} />}
       {page === 'dashboard' && <DashboardPage user={user} onUpgrade={() => setPage('pricing')} onAnalyze={() => setPage('upload')} />}
       {page === 'pricing' && <PricingPage user={user} onBack={() => setPage('upload')} />}
     </div>
