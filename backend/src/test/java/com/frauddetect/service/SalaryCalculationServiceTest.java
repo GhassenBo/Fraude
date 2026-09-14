@@ -287,26 +287,27 @@ class SalaryCalculationServiceTest {
     }
 
     @Test
-    void checkNetBrutRatio_syntec_belowRange_shouldFail() {
-        // Syntec: [0.74, 0.82] — ratio 70% est sous 74%
+    void checkNetBrutRatio_syntec_belowRange_sansCotisations_shouldWarn() {
+        // Sans total de cotisations, le ratio net/brut est un indice faible
+        // (interessement, frais) : WARNING et non FAILED.
         List<AnalysisResult.Check> checks = service.analyzeCalculations(
             "net a payer\nsiret\ncotisation\nconges payes\nConv. Collective : Syntec",
             docInfo("4000.00 €", "2800.00 €"), true); // 70%
 
         AnalysisResult.Check check = findCheck(checks, "Ratio Net/Brut CCN");
-        assertThat(check.getStatus()).isEqualTo("FAILED");
+        assertThat(check.getStatus()).isEqualTo("WARNING");
         assertThat(check.getDetail()).contains("Syntec");
     }
 
     @Test
-    void checkNetBrutRatio_syntec_aboveRange_shouldFail() {
-        // Syntec: [0.74, 0.82] — ratio 85% is above 82%
+    void checkNetBrutRatio_syntec_aboveRange_sansCotisations_shouldWarn() {
+        // Syntec: [0.74, 0.82] — 85% hors plage, mais sans cotisations -> WARNING
         List<AnalysisResult.Check> checks = service.analyzeCalculations(
             "net a payer\nsiret\ncotisation\nconges payes\nConv. Collective : Syntec",
             docInfo("4000.00 €", "3400.00 €"), true); // 85%
 
         AnalysisResult.Check check = findCheck(checks, "Ratio Net/Brut CCN");
-        assertThat(check.getStatus()).isEqualTo("FAILED");
+        assertThat(check.getStatus()).isEqualTo("WARNING");
     }
 
     @Test
@@ -551,5 +552,66 @@ class SalaryCalculationServiceTest {
         assertThat(service.moisDePeriode("")).isNull();
         assertThat(service.moisDePeriode("periode de paie")).isNull();
         assertThat(service.moisDePeriode("13/2026")).isNull();
+    }
+
+    // ── Taux de charge (issu de l'observation de bulletins reels) ─────────────
+
+    @Test
+    void tauxDeCharge_dansLaPlage_shouldBeOK() {
+        // "Montant total des cotisations 880,00 1 900,00" : part salariale puis patronale.
+        // Taux de charge = (4000 - 880) / 4000 = 78%, dans la plage standard.
+        String text = "Montant total des cotisations 880,00 1 900,00\n"
+            + "net a payer\nsiret\ncotisation\nconges payes\nconvention collective";
+
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(
+            text, docInfo("4000.00 €", "3700.00 €"), true);
+
+        AnalysisResult.Check check = findCheck(checks, "Ratio Net/Brut CCN");
+        assertThat(check.getStatus()).isEqualTo("OK");
+        assertThat(check.getDetail()).contains("Brut−cotisations");
+    }
+
+    @Test
+    void tauxDeCharge_horsPlage_shouldFail() {
+        // (4000 - 200) / 4000 = 95% : cotisations anormalement faibles.
+        String text = "Montant total des cotisations 200,00 1 900,00\n"
+            + "net a payer\nsiret\ncotisation\nconges payes\nconvention collective";
+
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(
+            text, docInfo("4000.00 €", "3700.00 €"), true);
+
+        assertThat(findCheck(checks, "Ratio Net/Brut CCN").getStatus()).isEqualTo("FAILED");
+    }
+
+    @Test
+    void netAvantImpot_nePrendPasLaBaseDuPas() {
+        // Structure reelle : la ligne PAS suit le net avant impot et porte une base
+        // superieure. L'ancienne extraction retenait le plus grand montant de la
+        // fenetre et lisait donc la base du PAS comme net.
+        String text = "Salaire brut 1 619.78\n"
+            + "Montant total des cotisations 377.18 641.01\n"
+            + "Net a payer avant impot sur le revenu 1 509.66\n"
+            + "Impot sur le revenu preleve a la source - PAS 1 690.44 - 12.6000 213.00\n"
+            + "Net paye 1 296.66\nsiret\ncotisation\nconges payes\nconvention collective";
+
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(text, null, false);
+
+        // 104% aurait signale un net superieur au brut ; le taux de charge reel est 76.7%
+        assertThat(findCheck(checks, "Ratio Net/Brut CCN").getDetail()).contains("76.7%");
+    }
+
+    @Test
+    void coherenceCotisations_ignoreeAvecInteressement() {
+        // L'interessement s'ajoute au net hors brut : brut - net = cotisations
+        // devient faux sans qu'il y ait anomalie.
+        String text = "Salaire brut 1 619.78\n"
+            + "Montant total des cotisations 377.18 641.01\n"
+            + "Interessement verse 323.96\n"
+            + "Net a payer avant impot sur le revenu 1 509.66\n"
+            + "siret\ncotisation\nconges payes\nconvention collective";
+
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(text, null, false);
+
+        assertThat(checks).noneMatch(c -> "Cohérence des cotisations".equals(c.getLabel()));
     }
 }
