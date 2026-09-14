@@ -41,11 +41,13 @@ public class AuthDto {
         private int documentsUsed;
         private int remainingDocuments;
         private boolean isPro;
+        private boolean emailVerified;
 
         public static UserInfo from(com.frauddetect.entity.User user, int freeLimit) {
             UserInfo info = new UserInfo();
             info.id = user.getId();
             info.email = user.getEmail();
+            info.emailVerified = user.isEmailVerified();
             info.plan = user.getPlan().name();
             info.documentsUsed = user.getDocumentsUsed();
             info.remainingDocuments = user.remainingFreeDocuments(freeLimit);

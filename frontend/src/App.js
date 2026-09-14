@@ -5,7 +5,7 @@ import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import DashboardPage from './pages/DashboardPage';
 import PricingPage from './pages/PricingPage';
-import { getToken, getUser, logout } from './services/auth';
+import { getToken, getUser, logout, refreshMe, resendVerification } from './services/auth';
 import './App.css';
 
 export default function App() {
@@ -13,11 +13,23 @@ export default function App() {
   const [page, setPage] = useState('upload');
   const [result, setResult] = useState(null);
   const [filename, setFilename] = useState('');
+  const [notice, setNotice] = useState(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('upgrade') === 'success') {
       setPage('dashboard');
+    }
+
+    const verified = params.get('verified');
+    if (verified === '1') {
+      setNotice({ type: 'success', text: 'Adresse email confirmée. Vous pouvez lancer vos analyses.' });
+      if (getToken()) refreshMe().then(setUser).catch(() => {});
+    } else if (verified === '0') {
+      setNotice({ type: 'error', text: 'Lien invalide ou expiré. Demandez un nouvel email de confirmation.' });
+    }
+    if (verified) {
+      window.history.replaceState({}, '', window.location.pathname);
     }
   }, []);
 
@@ -54,10 +66,50 @@ export default function App() {
   return (
     <div className="app">
       <Header user={user} onLogout={handleLogout} onNav={setPage} currentPage={page} />
+      {notice && <Notice notice={notice} onClose={() => setNotice(null)} />}
+      {user && !user.emailVerified && <VerifyBanner email={user.email} />}
       {page === 'upload' && <UploadPage onResult={handleResult} user={user} onUpgrade={() => setPage('pricing')} />}
       {page === 'result' && <ResultPage result={result} filename={filename} onReset={handleReset} onUpgrade={() => setPage('pricing')} />}
       {page === 'dashboard' && <DashboardPage user={user} onUpgrade={() => setPage('pricing')} onAnalyze={() => setPage('upload')} />}
       {page === 'pricing' && <PricingPage user={user} onBack={() => setPage('upload')} />}
+    </div>
+  );
+}
+
+function Notice({ notice, onClose }) {
+  return (
+    <div className={`notice notice-${notice.type}`}>
+      <span>{notice.text}</span>
+      <button className="notice-close" onClick={onClose} aria-label="Fermer">×</button>
+    </div>
+  );
+}
+
+function VerifyBanner({ email }) {
+  const [state, setState] = useState('idle');
+
+  const send = async () => {
+    setState('sending');
+    try {
+      await resendVerification();
+      setState('sent');
+    } catch {
+      setState('error');
+    }
+  };
+
+  return (
+    <div className="verify-banner">
+      <span className="verify-icon">✉</span>
+      <div className="verify-text">
+        <strong>Confirmez votre adresse email</strong>
+        <span>Un lien a été envoyé à {email}. L'analyse sera débloquée dès la confirmation.</span>
+      </div>
+      {state === 'sent'
+        ? <span className="verify-sent">Email renvoyé</span>
+        : <button className="verify-btn" onClick={send} disabled={state === 'sending'}>
+            {state === 'sending' ? 'Envoi…' : state === 'error' ? 'Réessayer' : 'Renvoyer l’email'}
+          </button>}
     </div>
   );
 }

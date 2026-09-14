@@ -37,6 +37,11 @@ public class AnalysisController {
         if (file.getSize() > 10 * 1024 * 1024)
             return ResponseEntity.badRequest().body(Map.of("error", "Fichier trop volumineux (max 10MB)"));
 
+        if (!user.isEmailVerified())
+            return ResponseEntity.status(403).body(Map.of(
+                "error", "Confirmez votre adresse email pour lancer une analyse",
+                "emailNotVerified", true));
+
         try {
             AnalysisResult result = fraudDetectionService.analyze(file, user);
             return ResponseEntity.ok(result);

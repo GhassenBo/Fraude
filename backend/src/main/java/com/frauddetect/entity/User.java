@@ -31,6 +31,14 @@ public class User {
     @Builder.Default
     private Integer documentsUsed = 0;
 
+    // Email verification.
+    // NULL identifie les comptes crees avant l'introduction de la verification :
+    // ils sont consideres comme verifies pour ne pas bloquer les utilisateurs existants.
+    private Boolean emailVerified;
+
+    private String verificationToken;
+    private LocalDateTime verificationTokenExpiresAt;
+
     // Stripe
     private String stripeCustomerId;
     private String stripeSubscriptionId;
@@ -42,6 +50,14 @@ public class User {
     private LocalDateTime proSince;
 
     public enum Plan { FREE, PRO }
+
+    public boolean isEmailVerified() {
+        return emailVerified == null || emailVerified;
+    }
+
+    public boolean isVerificationTokenValid(LocalDateTime now) {
+        return verificationTokenExpiresAt != null && now.isBefore(verificationTokenExpiresAt);
+    }
 
     public boolean canAnalyze(int freeLimit) {
         return plan == Plan.PRO || documentsUsed < freeLimit;

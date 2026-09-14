@@ -1,0 +1,90 @@
+package com.frauddetect.service;
+
+import com.frauddetect.entity.User;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.MimeMessageHelper;
+import org.springframework.stereotype.Service;
+
+import jakarta.mail.internet.MimeMessage;
+
+@Service
+public class EmailService {
+
+    private final JavaMailSender mailSender;
+
+    @Value("${app.mail.from:noreply@frauddetect.fr}")
+    private String from;
+
+    @Value("${app.mail.from-name:FraudDetect}")
+    private String fromName;
+
+    @Value("${app.base.url}")
+    private String baseUrl;
+
+    @Value("${spring.mail.host:}")
+    private String mailHost;
+
+    public EmailService(JavaMailSender mailSender) {
+        this.mailSender = mailSender;
+    }
+
+    public boolean isEnabled() {
+        return mailHost != null && !mailHost.isBlank();
+    }
+
+    public void sendVerificationEmail(User user, String token) {
+        if (!isEnabled()) {
+            System.out.println("[MAIL] Desactive (spring.mail.host non defini) — lien de verification : "
+                + verificationLink(token));
+            return;
+        }
+
+        try {
+            MimeMessage message = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(message, "UTF-8");
+            helper.setFrom(from, fromName);
+            helper.setTo(user.getEmail());
+            helper.setSubject("Confirmez votre adresse email — FraudDetect");
+            helper.setText(buildHtml(verificationLink(token)), true);
+            mailSender.send(message);
+        } catch (Exception e) {
+            // L'inscription ne doit pas echouer si l'envoi echoue : l'utilisateur
+            // peut demander un renvoi depuis l'application.
+            System.err.println("[MAIL] Envoi impossible a " + user.getEmail() + " : " + e.getMessage());
+        }
+    }
+
+    private String verificationLink(String token) {
+        return firstOrigin(baseUrl) + "/api/auth/verify?token=" + token;
+    }
+
+    // FRONTEND_URL peut contenir plusieurs origines separees par des virgules (CORS).
+    private String firstOrigin(String url) {
+        String first = url.split(",")[0].trim();
+        return first.endsWith("/") ? first.substring(0, first.length() - 1) : first;
+    }
+
+    private String buildHtml(String link) {
+        return """
+            <div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:520px;margin:0 auto;padding:32px 24px;color:#1a1a2e">
+              <h1 style="font-size:22px;margin:0 0 8px">Confirmez votre adresse email</h1>
+              <p style="color:#555;line-height:1.6;margin:0 0 24px">
+                Bienvenue sur FraudDetect. Cliquez sur le bouton ci-dessous pour activer
+                l'analyse de vos bulletins de salaire.
+              </p>
+              <a href="%s" style="display:inline-block;background:#00d4ff;color:#001018;text-decoration:none;font-weight:600;padding:13px 26px;border-radius:8px">
+                Confirmer mon adresse
+              </a>
+              <p style="color:#888;font-size:13px;line-height:1.6;margin:24px 0 0">
+                Ce lien expire dans 24 heures. Si le bouton ne fonctionne pas, copiez cette adresse
+                dans votre navigateur :<br>
+                <span style="color:#0088aa;word-break:break-all">%s</span>
+              </p>
+              <p style="color:#aaa;font-size:12px;margin:24px 0 0">
+                Vous n'avez pas cree de compte ? Ignorez simplement ce message.
+              </p>
+            </div>
+            """.formatted(link, link);
+    }
+}

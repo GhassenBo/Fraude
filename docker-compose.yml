@@ -42,6 +42,12 @@ services:
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost}
       SPRING_PROFILES_ACTIVE: prod
       OPENAI_API_KEY: ${OPENAI_API_KEY}
+      MAIL_HOST: ${MAIL_HOST:-}
+      MAIL_PORT: ${MAIL_PORT:-587}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-noreply@frauddetect.fr}
+      MAIL_FROM_NAME: ${MAIL_FROM_NAME:-FraudDetect}
     networks:
       - internal
     healthcheck:

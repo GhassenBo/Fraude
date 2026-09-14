@@ -42,6 +42,11 @@ export async function login(email, password) {
   return res.data.user;
 }
 
+export async function resendVerification() {
+  const res = await api.post('/api/auth/resend-verification');
+  return res.data;
+}
+
 export async function refreshMe() {
   const res = await api.get('/api/auth/me');
   localStorage.setItem(USER_KEY, JSON.stringify(res.data));
