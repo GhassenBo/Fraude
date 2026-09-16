@@ -26,20 +26,17 @@ public class PdfAnalyzer {
     }
 
     // Known payroll software producers
-    // Editeurs de paie identifiables uniquement. La comparaison se faisant par
-    // inclusion, tout terme generique serait exploitable : "paie" validait par
-    // exemple n'importe quel producteur contenant ce mot. Les bibliotheques
-    // PDF (reportlab, tcpdf, pdfsharp...) sont volontairement absentes : elles
-    // servent autant aux logiciels de paie qu'aux generateurs de faux, et ne
-    // prouvent donc rien. Un producteur inconnu reste neutre, pas suspect.
     private static final List<String> LEGIT_PRODUCERS = List.of(
         "sage", "adp", "silae", "cegid", "hr access", "peopledoc",
         "payfit", "lucca", "workday", "sap", "oracle", "quadratus",
-        "microsoft dynamics", "isapaye", "decidium", "nibelis",
-        "pegase", "novapaie", "hr path", "cegedim", "talentia",
-        "crystal reports",
-        // Plateformes publiques
-        "urssaf", "tese", "net-entreprises"
+        "microsoft dynamics", "paye", "isapaye", "decidium", "nibelis",
+        "pegase", "novapaie", "hr path", "inser", "cegedim", "talentia",
+        "emploi", "paie", "bulletin", "reportlab", "itext", "pdfbox",
+        "jasper", "apache", "crystal reports",
+        // Government / URSSAF platforms
+        "urssaf", "tese", "cea", "net-entreprises", "dsn",
+        // Common PDF generation libraries used by payroll software
+        "fpdf", "tcpdf", "fo2pdf", "apache fop", "xsl-fo"
     );
 
     private static final List<String> SUSPICIOUS_PRODUCERS = List.of(
