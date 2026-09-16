@@ -93,16 +93,22 @@ export default function AvisImpositionPanel() {
             </div>
           ))}
 
-          {result.avis?.numeroFiscal && (
+          {result.avis?.salairesDeclares?.length > 0 && (
             <div className="avis-ids">
               <div>
-                <span>Numéro fiscal</span>
-                <code>{result.avis.numeroFiscal}</code>
+                <span>Salaires déclarés</span>
+                <code>
+                  {result.avis.salairesDeclares
+                    .map((v) => `${Math.round(v).toLocaleString('fr-FR')} €`)
+                    .join('  ·  ')}
+                </code>
               </div>
-              <div>
-                <span>Référence de l&rsquo;avis</span>
-                <code>{result.avis.referenceAvis}</code>
-              </div>
+              {result.avis.anneeRevenus && (
+                <div>
+                  <span>Revenus de</span>
+                  <code>{result.avis.anneeRevenus}</code>
+                </div>
+              )}
             </div>
           )}
 
@@ -114,7 +120,8 @@ export default function AvisImpositionPanel() {
           ) : (
             <p className="avis-hint">
               Confirmez l&rsquo;authenticité de l&rsquo;avis sur le service officiel de
-              vérification, à l&rsquo;aide des deux identifiants ci-dessus.
+              vérification, à l&rsquo;aide du numéro fiscal et de la référence figurant
+              en tête du document.
             </p>
           )}
 

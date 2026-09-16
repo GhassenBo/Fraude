@@ -127,7 +127,7 @@ public class AnalysisController {
             Map<String, Object> body = new java.util.HashMap<>();
             body.put("avis", avis);
             body.put("checks", avisImpositionService.verify(avis, netImposableMensuel));
-            String link = avisImpositionService.verificationLink(avis);
+            String link = avisImpositionService.verificationLink();
             if (link != null) body.put("verificationUrl", link);
 
             return ResponseEntity.ok(body);

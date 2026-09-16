@@ -41,14 +41,23 @@ public class AvisImpositionService {
     private static final Pattern REFERENCE_AVIS = Pattern.compile(
         "(?i)r[eé]f[eé]rence de l'?avis\\s*:?\\s*((?:[0-9A-Z][\\s.]?){13})");
 
-    private static final Pattern TRAITEMENTS_SALAIRES = Pattern.compile(
-        "(?i)traitements,?\\s*(?:salaires|et salaires)[^0-9]{0,40}((?:\\d{1,3}(?:[\\s ]\\d{3})+|\\d+)(?:[.,]\\d{2})?)");
+    // Libelles reels du tableau de revenus, par ordre de pertinence.
+    private static final List<String> LABELS_SALAIRES = List.of(
+        "total des salaires et assimiles", "salaires, pensions, rentes nets",
+        "traitements, salaires", "traitements et salaires", "salaires");
 
-    private static final Pattern REVENU_FISCAL = Pattern.compile(
-        "(?i)revenu fiscal de r[eé]f[eé]rence[^0-9]{0,40}((?:\\d{1,3}(?:[\\s ]\\d{3})+|\\d+)(?:[.,]\\d{2})?)");
+    private static final String LABEL_REVENU_FISCAL = "revenu fiscal de reference";
 
+    // Les montants suivent les points de conduite. Un renvoi numerote est souvent
+    // accole au libelle ("assimiles 2", "reference 25") : le decoupage l'ecarte.
+    private static final Pattern POINTS_DE_CONDUITE = Pattern.compile("\\.{4,}");
+
+    private static final Pattern MONTANT = Pattern.compile(
+        "(?<![0-9.,])((?:\\d{1,3}(?:[\\s\u00a0]\\d{3})+|\\d+)(?:[.,]\\d{2})?)(?![0-9])");
+
+    // Couvre "revenus 2025", "revenus de 2025" et "revenus de l'annee 2025".
     private static final Pattern ANNEE_REVENUS = Pattern.compile(
-        "(?i)revenus?\\s*(?:de\\s*l'?ann[eé]e\\s*)?(20\\d{2})");
+        "(?i)revenus?\\s*(?:de\\s*(?:l'?ann[eé]e\\s*)?)?(20\\d{2})");
 
     /**
      * Extraction limitee au texte : l'analyse Vision et les controles forensiques
@@ -57,18 +66,49 @@ public class AvisImpositionService {
      */
     public AvisImposition extractFromPdf(InputStream inputStream) throws Exception {
         try (PDDocument document = Loader.loadPDF(inputStream.readAllBytes())) {
-            return extract(new PDFTextStripper().getText(document));
+            // Sans tri par position, la mise en page en colonnes de l'avis detache
+            // les montants de leurs libelles : ils sortent dans des blocs distincts.
+            PDFTextStripper stripper = new PDFTextStripper();
+            stripper.setSortByPosition(true);
+            return extract(stripper.getText(document));
         }
     }
 
     public AvisImposition extract(String text) {
+        String[] lines = text.split("\\r?\\n");
+        List<Double> salaires = amountsForLabel(lines, LABELS_SALAIRES);
+        List<Double> revenuFiscal = amountsForLabel(lines, List.of(LABEL_REVENU_FISCAL));
+
         return AvisImposition.builder()
-            .numeroFiscal(firstGroup(NUMERO_FISCAL, text, true))
-            .referenceAvis(firstGroup(REFERENCE_AVIS, text, true))
-            .anneeRevenus(parseInt(firstGroup(ANNEE_REVENUS, text, false)))
-            .traitementsSalaires(parseAmount(firstGroup(TRAITEMENTS_SALAIRES, text, false)))
-            .revenuFiscalReference(parseAmount(firstGroup(REVENU_FISCAL, text, false)))
+            .anneeRevenus(parseInt(firstGroup(ANNEE_REVENUS, text)))
+            .salairesDeclares(salaires)
+            .revenuFiscalReference(revenuFiscal.isEmpty() ? null : revenuFiscal.get(0))
             .build();
+    }
+
+    /**
+     * Montants portes par la premiere ligne correspondant a l'un des libelles.
+     * Un avis de foyer presente une colonne par declarant et un total : tous sont
+     * conserves, le rapprochement retenant celle qui concerne le candidat.
+     */
+    private List<Double> amountsForLabel(String[] lines, List<String> labels) {
+        for (String label : labels) {
+            for (String line : lines) {
+                if (!normalize(line).contains(label)) continue;
+
+                String[] parts = POINTS_DE_CONDUITE.split(line, 2);
+                String zone = parts.length > 1 ? parts[1] : line;
+
+                List<Double> amounts = new ArrayList<>();
+                Matcher m = MONTANT.matcher(zone);
+                while (m.find()) {
+                    Double v = parseAmount(m.group(1));
+                    if (v != null && v > 0) amounts.add(v);
+                }
+                if (!amounts.isEmpty()) return amounts;
+            }
+        }
+        return List.of();
     }
 
     /**
@@ -79,49 +119,56 @@ public class AvisImpositionService {
         List<AnalysisResult.Check> checks = new ArrayList<>();
         String category = "Avis d'imposition";
 
-        if (avis.getNumeroFiscal() == null || avis.getReferenceAvis() == null) {
-            checks.add(check(category, "Identifiants de l'avis", "WARNING",
-                "Numéro fiscal ou référence de l'avis illisible — la vérification"
-                    + " auprès de l'administration ne peut pas être préparée"));
-        } else {
-            checks.add(check(category, "Identifiants de l'avis", "OK",
-                "Numéro fiscal et référence de l'avis extraits :"
-                    + " utilisez le bouton de vérification pour confirmer l'authenticité"
-                    + " auprès de l'administration fiscale"));
-        }
-
-        Double declare = avis.getTraitementsSalaires();
-        if (declare == null) {
+        List<Double> salaires = avis.getSalairesDeclares();
+        if (salaires == null || salaires.isEmpty()) {
             checks.add(check(category, "Revenus déclarés", "WARNING",
-                "Montant des traitements et salaires introuvable sur l'avis"));
+                "Montant des salaires introuvable sur l'avis — vérifiez qu'il s'agit"
+                    + " bien d'un avis d'imposition et non d'un autre document fiscal"));
             return checks;
         }
 
         if (netImposableMensuel == null || netImposableMensuel <= 0) {
             checks.add(check(category, "Revenus déclarés", "OK",
-                String.format("Traitements et salaires déclarés : %.0f €"
-                    + " — fournissez un bulletin pour permettre le rapprochement", declare)));
+                String.format("Salaires déclarés relevés sur l'avis : %s"
+                    + " — renseignez le net imposable d'un bulletin pour permettre"
+                    + " le rapprochement", formatAmounts(salaires))));
             return checks;
         }
 
         double attendu = netImposableMensuel * 12;
-        double ecart = Math.abs(declare - attendu) / attendu;
 
-        if (ecart > TOLERANCE) {
+        // Un avis de foyer cumule les revenus des deux declarants : comparer le
+        // total aux bulletins d'une seule personne signalerait a tort tous les
+        // couples. Le rapprochement retient donc la colonne la plus proche.
+        double meilleurEcart = salaires.stream()
+            .mapToDouble(v -> Math.abs(v - attendu) / attendu)
+            .min().orElse(Double.MAX_VALUE);
+
+        String mention = salaires.size() > 1
+            ? String.format(" (avis de foyer, %d montants déclarés : %s — le plus proche"
+                + " des bulletins est retenu)", salaires.size(), formatAmounts(salaires))
+            : "";
+
+        if (meilleurEcart > TOLERANCE) {
             checks.add(check(category, "Rapprochement avis / bulletins", "FAILED",
                 String.format(
-                    "Revenus déclarés (%.0f €) incohérents avec les bulletins"
-                        + " (%.0f € attendus sur douze mois, écart de %.0f %%)"
-                        + " — écart trop important pour une simple évolution de salaire",
-                    declare, attendu, ecart * 100)));
+                    "Aucun revenu déclaré ne correspond aux bulletins : %.0f € attendus"
+                        + " sur douze mois, écart minimal de %.0f %%%s",
+                    attendu, meilleurEcart * 100, mention)));
         } else {
             checks.add(check(category, "Rapprochement avis / bulletins", "OK",
                 String.format(
-                    "Revenus déclarés (%.0f €) cohérents avec les bulletins"
-                        + " (%.0f € attendus, écart de %.0f %%)",
-                    declare, attendu, ecart * 100)));
+                    "Revenus déclarés cohérents avec les bulletins : %.0f € attendus"
+                        + " sur douze mois, écart de %.0f %%%s",
+                    attendu, meilleurEcart * 100, mention)));
         }
         return checks;
+    }
+
+    private String formatAmounts(List<Double> amounts) {
+        List<String> formatted = new ArrayList<>();
+        for (Double a : amounts) formatted.add(String.format("%.0f €", a));
+        return String.join(", ", formatted);
     }
 
     /**
@@ -129,17 +176,13 @@ public class AvisImpositionService {
      * sur l'avis. Retourne null si aucune URL n'est configuree : mieux vaut ne rien
      * proposer qu'envoyer le gestionnaire vers une adresse erronee.
      */
-    public String verificationLink(AvisImposition avis) {
-        if (verificationUrl == null || verificationUrl.isBlank()) return null;
-        if (avis.getNumeroFiscal() == null || avis.getReferenceAvis() == null) return null;
-        return verificationUrl;
+    public String verificationLink() {
+        return (verificationUrl == null || verificationUrl.isBlank()) ? null : verificationUrl;
     }
 
-    private String firstGroup(Pattern pattern, String text, boolean stripSeparators) {
+    private String firstGroup(Pattern pattern, String text) {
         Matcher m = pattern.matcher(text);
-        if (!m.find()) return null;
-        String value = m.group(1).trim();
-        return stripSeparators ? value.replaceAll("[\\s.]", "") : value;
+        return m.find() ? m.group(1).trim() : null;
     }
 
     private Integer parseInt(String raw) {
