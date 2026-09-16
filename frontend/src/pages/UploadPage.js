@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { api } from '../services/auth';
+import AvisImpositionPanel from './AvisImpositionPanel';
 import './UploadPage.css';
 
 export default function UploadPage({ onResult, onBatchResult, user, onUpgrade }) {
@@ -270,6 +271,8 @@ export default function UploadPage({ onResult, onBatchResult, user, onUpgrade })
           </div>
         ))}
       </div>
+
+      <AvisImpositionPanel />
     </main>
   );
 }

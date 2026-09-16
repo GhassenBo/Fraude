@@ -1,0 +1,80 @@
+.avis-panel {
+  max-width: 760px; margin: 48px auto 0; padding: 26px 28px;
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 10px;
+}
+.avis-title { font-size: 19px; margin: 0 0 6px; }
+.avis-sub { font-size: 14px; color: var(--text-muted); margin: 0 0 22px; line-height: 1.6; }
+
+.avis-row { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; }
+.avis-file-btn {
+  flex: 1; min-width: 220px; padding: 12px 16px;
+  background: var(--bg3); border: 1px dashed var(--border); border-radius: 8px;
+  color: var(--text); font-size: 14px; cursor: pointer; text-align: left;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.avis-file-btn:hover { border-color: var(--accent); }
+
+.avis-field { display: flex; flex-direction: column; gap: 5px; }
+.avis-field span { font-size: 12px; color: var(--text-muted); }
+.avis-field input {
+  width: 130px; padding: 11px 12px;
+  background: var(--bg3); border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text); font-size: 14px; font-family: var(--font-mono);
+}
+.avis-field input:focus { outline: none; border-color: var(--accent); }
+
+.avis-hint { font-size: 12.5px; color: var(--text-muted); margin: 12px 0 0; line-height: 1.6; }
+.avis-error {
+  margin-top: 14px; padding: 11px 14px; border-radius: 7px; font-size: 13.5px;
+  background: rgba(255,51,102,0.1); border: 1px solid rgba(255,51,102,0.35); color: var(--red);
+}
+
+.avis-submit, .avis-reset {
+  margin-top: 18px; padding: 12px 24px; border-radius: 8px;
+  border: none; font-weight: 600; font-size: 14px; cursor: pointer;
+}
+.avis-submit { background: var(--accent); color: #001018; }
+.avis-submit:disabled { opacity: 0.45; cursor: default; }
+.avis-reset { background: transparent; border: 1px solid var(--border); color: var(--text-muted); }
+.avis-reset:hover { border-color: var(--accent); color: var(--accent); }
+
+.avis-result { display: flex; flex-direction: column; gap: 10px; }
+.avis-check {
+  display: flex; gap: 12px; align-items: flex-start;
+  padding: 13px 15px; border-radius: 8px;
+  background: var(--bg3); border: 1px solid var(--border);
+}
+.avis-check.avis-ok { border-color: rgba(0,255,135,0.3); }
+.avis-check.avis-warning { border-color: rgba(255,153,0,0.4); background: rgba(255,153,0,0.06); }
+.avis-check.avis-failed { border-color: rgba(255,51,102,0.45); background: rgba(255,51,102,0.07); }
+.avis-check-icon {
+  flex-shrink: 0; width: 19px; height: 19px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700;
+}
+.avis-ok .avis-check-icon { background: rgba(0,255,135,0.15); color: var(--green); }
+.avis-warning .avis-check-icon { background: rgba(255,153,0,0.18); color: var(--orange); }
+.avis-failed .avis-check-icon { background: rgba(255,51,102,0.18); color: var(--red); }
+.avis-check div { display: flex; flex-direction: column; gap: 3px; }
+.avis-check strong { font-size: 13.5px; }
+.avis-check span { font-size: 13px; color: var(--text-muted); line-height: 1.55; }
+
+.avis-ids {
+  display: flex; flex-wrap: wrap; gap: 24px;
+  padding: 14px 15px; margin-top: 4px;
+  background: var(--bg3); border: 1px solid var(--border); border-radius: 8px;
+}
+.avis-ids > div { display: flex; flex-direction: column; gap: 4px; }
+.avis-ids span { font-size: 11.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.avis-ids code { font-family: var(--font-mono); font-size: 14px; color: var(--accent); }
+
+.avis-verify {
+  display: inline-block; margin-top: 6px; padding: 12px 22px;
+  background: var(--accent); color: #001018; border-radius: 8px;
+  text-decoration: none; font-weight: 600; font-size: 14px; text-align: center;
+}
+
+@media (max-width: 640px) {
+  .avis-panel { padding: 20px 18px; margin-top: 32px; }
+  .avis-field input { width: 100%; }
+}
