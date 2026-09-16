@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+
+# L'API n'a rien a indexer
+Disallow: /api/
+
+Sitemap: https://frauddetect.fr/sitemap.xml

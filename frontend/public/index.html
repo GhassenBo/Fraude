@@ -3,12 +3,126 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>FraudDetect – Vérification de bulletins de salaire</title>
+
+    <title>Vérifier les fiches de paie des candidats locataires | FraudDetect</title>
+    <meta name="description" content="Détectez les fiches de paie falsifiées dans les dossiers de candidats locataires. Analyse instantanée : vérification SIRET, cohérence des cotisations, métadonnées PDF." />
+    <link rel="canonical" href="https://frauddetect.fr/" />
+    <meta name="robots" content="index, follow" />
+    <meta name="theme-color" content="#0a0a0f" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="FraudDetect" />
+    <meta property="og:locale" content="fr_FR" />
+    <meta property="og:url" content="https://frauddetect.fr/" />
+    <meta property="og:title" content="Vérifier les fiches de paie des candidats locataires" />
+    <meta property="og:description" content="Détectez les fiches de paie falsifiées dans les dossiers de candidats locataires. Analyse instantanée des bulletins de salaire français." />
+    <meta name="twitter:card" content="summary_large_image" />
+
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "FraudDetect",
+      "url": "https://frauddetect.fr/",
+      "applicationCategory": "BusinessApplication",
+      "operatingSystem": "Web",
+      "inLanguage": "fr-FR",
+      "description": "Plateforme d'analyse des dossiers de candidats locataires pour les agences immobilières et gestionnaires locatifs. Détecte les fiches de paie falsifiées.",
+      "audience": {
+        "@type": "Audience",
+        "audienceType": "Agences immobilières et gestionnaires locatifs"
+      },
+      "offers": [
+        {
+          "@type": "Offer",
+          "name": "Gratuit",
+          "price": "0",
+          "priceCurrency": "EUR",
+          "description": "10 analyses complètes sans carte bancaire"
+        },
+        {
+          "@type": "Offer",
+          "name": "Pro",
+          "price": "49",
+          "priceCurrency": "EUR",
+          "description": "Analyses illimitées, historique complet et export PDF des rapports"
+        }
+      ]
+    }
+    </script>
+
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Comment fonctionne la période gratuite ?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Vous bénéficiez de 10 analyses complètes sans carte bancaire, sans limite de temps."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Comment détecter une fiche de paie falsifiée ?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "FraudDetect croise plusieurs contrôles : validité du SIRET de l'employeur auprès de la base officielle des entreprises, cohérence entre le salaire brut, les cotisations salariales et le net à payer, taux de charge comparé aux conventions collectives, progression des cumuls annuels entre bulletins consécutifs, et analyse des métadonnées du PDF."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Puis-je annuler mon abonnement à tout moment ?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Oui, l'abonnement Pro est sans engagement et résiliable à tout moment depuis votre espace client."
+          }
+        }
+      ]
+    }
+    </script>
   </head>
   <body>
-    <div id="root"></div>
+    <!--
+      Contenu servi dans le HTML pour que les moteurs de recherche indexent la page
+      sans dependre de l'execution du JavaScript. React le remplace au montage ;
+      il doit donc rester le reflet fidele de ce qu'affiche l'application.
+    -->
+    <div id="root">
+      <main>
+        <h1>Vérifiez l'authenticité d'un bulletin de salaire</h1>
+        <p>
+          FraudDetect aide les agences immobilières et les gestionnaires locatifs à
+          contrôler les dossiers de candidats locataires et à repérer les documents
+          suspects, en particulier les fiches de paie falsifiées.
+        </p>
+        <h2>Ce que l'analyse vérifie</h2>
+        <ul>
+          <li>Validité du numéro SIRET de l'employeur dans la base officielle des entreprises</li>
+          <li>Cohérence entre salaire brut, cotisations salariales et net à payer</li>
+          <li>Taux de charge comparé aux plages des conventions collectives</li>
+          <li>Progression des cumuls annuels entre bulletins consécutifs</li>
+          <li>Prélèvement à la source et mentions obligatoires d'un bulletin français</li>
+          <li>Métadonnées et traces de modification du fichier PDF</li>
+        </ul>
+        <h2>Tarifs</h2>
+        <p>
+          10 analyses gratuites sans carte bancaire, puis 49 € HT par mois pour des
+          analyses illimitées, l'historique complet et l'export PDF des rapports.
+        </p>
+        <noscript>
+          <p>
+            L'analyse de documents nécessite JavaScript. Activez-le pour utiliser
+            FraudDetect.
+          </p>
+        </noscript>
+      </main>
+    </div>
   </body>
 </html>
