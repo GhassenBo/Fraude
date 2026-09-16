@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+<title>Reconnaître un faux bulletin de salaire : 7 signes | FraudDetect</title>
+<meta name="description" content="Les sept signes qui révèlent un faux bulletin de salaire, du calcul incohérent aux métadonnées du PDF, et les risques encourus par son auteur." />
+<link rel="canonical" href="https://frauddetect.fr/faux-bulletin-de-salaire/" />
+
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://frauddetect.fr/faux-bulletin-de-salaire/" />
+<meta property="og:title" content="Reconnaître un faux bulletin de salaire : 7 signes" />
+<meta property="og:description" content="Ce qui distingue un bulletin authentique d'un document retouché, signe par signe." />
+<meta property="og:site_name" content="FraudDetect" />
+<meta property="og:locale" content="fr_FR" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/content.css" />
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Article",
+  "headline": "Reconnaître un faux bulletin de salaire : 7 signes",
+  "description": "Ce qui distingue un bulletin authentique d'un document retouché.",
+  "inLanguage": "fr-FR",
+  "mainEntityOfPage": "https://frauddetect.fr/faux-bulletin-de-salaire/",
+  "publisher": { "@type": "Organization", "name": "FraudDetect" }
+}
+</script>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header-inner">
+    <a class="logo" href="/">
+      <span class="logo-icon">⬡</span>
+      <span class="logo-text">FRAUD<span class="logo-accent">DETECT</span></span>
+    </a>
+    <a class="header-cta" href="/">Analyser un bulletin</a>
+  </div>
+</header>
+
+<main>
+  <h1>Reconnaître un faux bulletin de salaire : 7 signes</h1>
+  <p class="lead">
+    Un bulletin retouché paraît souvent impeccable. Ce sont les relations entre les
+    chiffres, et non leur présentation, qui révèlent la falsification.
+  </p>
+
+  <p>
+    Ces sept signes sont classés du plus fiable au plus indicatif. Les trois premiers
+    constituent des impossibilités mathématiques : ils ne laissent aucune place au
+    doute. Les suivants demandent un examen du contexte.
+  </p>
+
+  <h2>1. Le net à payer dépasse le net social</h2>
+  <p>
+    Le « montant net social » est une mention obligatoire depuis 2023. Le net à payer
+    s'obtient en déduisant l'impôt prélevé à la source de ce montant. Il lui est donc
+    nécessairement inférieur ou égal.
+  </p>
+  <div class="example">Montant net social         2 400,00
+Impôt prélevé à la source     -120,00
+Net à payer                 2 280,00   ✓ cohérent
+
+Net à payer                 2 600,00   ✗ impossible</div>
+  <p>
+    C'est le signe le plus sûr, et l'erreur la plus commune : modifier la dernière
+    ligne du bulletin sans toucher au reste.
+  </p>
+
+  <h2>2. Les cumuls annuels ne progressent pas correctement</h2>
+  <p>
+    Si vous avez plusieurs bulletins consécutifs, la différence entre deux cumuls
+    bruts doit égaler exactement le brut du mois. Un écart, même de quelques euros,
+    signale une modification.
+  </p>
+  <p>
+    Ce contrôle est particulièrement puissant parce qu'il est très lourd à contourner :
+    il faudrait ajuster les cumuls de tous les bulletins suivants pour rester
+    cohérent.
+  </p>
+
+  <h2>3. Le net dépasse le brut</h2>
+  <p>
+    Cas rare mais sans ambiguïté possible. Il arrive quand quelqu'un modifie le net
+    sans réaliser que le brut affiché plus bas le contredit.
+  </p>
+
+  <h2>4. Le taux de cotisations est anormal</h2>
+  <p>
+    Les cotisations salariales d'un salarié du régime général représentent 20 % à
+    26 % du brut. Ces taux sont réglementés et varient peu.
+  </p>
+  <p>
+    Un taux de 10 % ou de 40 % est donc suspect — mais plusieurs situations
+    l'expliquent légitimement :
+  </p>
+  <ul>
+    <li><strong>Apprentissage ou professionnalisation :</strong> exonération totale des cotisations salariales, le net égale le brut</li>
+    <li><strong>Intéressement ou participation :</strong> s'ajoutent au net sans passer par le brut</li>
+    <li><strong>Avantages en nature :</strong> ajoutés au brut puis retirés du net</li>
+    <li><strong>Exonérations territoriales</strong> (zones franches, certaines aides à l'emploi)</li>
+  </ul>
+  <p>
+    Ce signe justifie une question, pas un rejet.
+  </p>
+
+  <h2>5. Le SIRET est invalide ou l'entreprise est fermée</h2>
+  <p>
+    Le SIRET est obligatoire sur un bulletin et vérifiable gratuitement dans la base
+    officielle des entreprises. Trois anomalies possibles : numéro inexistant,
+    entreprise radiée à la date du bulletin, ou raison sociale divergente.
+  </p>
+  <p>
+    Nuance utile : un nom commercial peut différer de la raison sociale, et une
+    filiale porte parfois un nom distinct de celui du groupe. Un écart de nom se
+    vérifie, il ne conclut pas.
+  </p>
+
+  <h2>6. Les mentions obligatoires manquent</h2>
+  <p>
+    Un bulletin français comporte obligatoirement la convention collective, le SIRET,
+    le détail ligne par ligne des cotisations, les congés payés acquis et le montant
+    net social.
+  </p>
+  <p>
+    Un document reconstitué à partir d'un modèle trouvé en ligne en omet souvent une
+    partie, ou présente des libellés de cotisations approximatifs — par exemple des
+    intitulés génériques là où un vrai logiciel de paie détaille chaque organisme.
+  </p>
+
+  <h2>7. Le fichier PDF trahit son origine</h2>
+  <p>
+    Les propriétés d'un PDF indiquent le logiciel qui l'a produit. Un bulletin
+    authentique provient d'un outil de paie : Sage, Silae, ADP, PayFit, Cegid,
+    Quadratus. Voir apparaître Microsoft Word, Photoshop, GIMP ou Canva est un signal
+    fort.
+  </p>
+  <p>
+    D'autres traces techniques peuvent subsister : rectangles blancs superposés
+    masquant un montant d'origine, champs de texte ajoutés, ou date de modification
+    postérieure à la création.
+  </p>
+  <div class="callout warn">
+    <p>
+      <strong>Deux limites :</strong> ce signe disparaît totalement si le document a
+      été imprimé puis scanné. Et une date de modification peut simplement résulter
+      de l'ouverture du fichier dans un lecteur PDF, sans aucune retouche.
+    </p>
+  </div>
+
+  <h2>Ce que risque l'auteur d'un faux</h2>
+  <p>
+    Établir ou utiliser un faux bulletin de salaire constitue un faux et usage de
+    faux au sens du code pénal, passible de trois ans d'emprisonnement et de
+    45 000 € d'amende. Lorsque le document sert à obtenir un crédit ou une
+    prestation, l'escroquerie peut s'y ajouter.
+  </p>
+  <p>
+    Dans le cadre locatif, la découverte d'un faux justifie le refus de la
+    candidature. Si le bail est déjà signé, elle peut fonder une action en nullité
+    pour dol, et compromettre la garantie d'une assurance loyers impayés.
+  </p>
+
+  <h2>La limite de tout contrôle documentaire</h2>
+  <p>
+    Il faut l'assumer : un faux techniquement irréprochable ne se détecte pas à
+    l'examen du document. Un bulletin généré avec un SIRET réel, des calculs exacts
+    et des cumuls cohérents ne présentera aucun des sept signes ci-dessus.
+  </p>
+  <p>
+    La seule preuve absolue résiderait dans la déclaration sociale que l'employeur
+    transmet à l'URSSAF, base inaccessible aux entreprises privées. C'est pourquoi
+    l'appel direct à l'employeur — au numéro que vous avez trouvé vous-même — reste
+    la vérification ultime.
+  </p>
+  <p>
+    Cela dit, la grande majorité des falsifications rencontrées en pratique sont
+    grossières et tombent sur l'un des trois premiers signes.
+  </p>
+
+  <div class="cta-block">
+    <h2>Contrôler ces sept points automatiquement</h2>
+    <p>
+      FraudDetect vérifie ces signes en quelques secondes et distingue les anomalies
+      réelles des situations légitimes comme l'alternance ou l'intéressement.
+      Dix analyses gratuites, sans carte bancaire.
+    </p>
+    <a class="cta-btn" href="/">Analyser un bulletin</a>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="site-footer-inner">
+    <nav>
+      <a href="/">Analyser un bulletin</a>
+      <a href="/fraude-fiche-de-paie/">Fraude à la fiche de paie</a>
+      <a href="/verifier-fiche-de-paie-locataire/">Vérifier un dossier locataire</a>
+    </nav>
+    <p>FraudDetect — analyse de dossiers de candidats locataires.</p>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+<title>Fraude à la fiche de paie : comment la détecter | FraudDetect</title>
+<meta name="description" content="Comment repérer une fiche de paie falsifiée : cumuls annuels non recalculés, taux de charge incohérent, SIRET invalide, métadonnées PDF. Guide pour professionnels." />
+<link rel="canonical" href="https://frauddetect.fr/fraude-fiche-de-paie/" />
+
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://frauddetect.fr/fraude-fiche-de-paie/" />
+<meta property="og:title" content="Fraude à la fiche de paie : comment la détecter" />
+<meta property="og:description" content="Les signes concrets d'un bulletin de salaire falsifié, et les vérifications qui résistent à la falsification." />
+<meta property="og:site_name" content="FraudDetect" />
+<meta property="og:locale" content="fr_FR" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/content.css" />
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Article",
+  "headline": "Fraude à la fiche de paie : comment la détecter",
+  "description": "Les signes concrets d'un bulletin de salaire falsifié et les vérifications qui résistent à la falsification.",
+  "inLanguage": "fr-FR",
+  "mainEntityOfPage": "https://frauddetect.fr/fraude-fiche-de-paie/",
+  "publisher": { "@type": "Organization", "name": "FraudDetect" }
+}
+</script>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header-inner">
+    <a class="logo" href="/">
+      <span class="logo-icon">⬡</span>
+      <span class="logo-text">FRAUD<span class="logo-accent">DETECT</span></span>
+    </a>
+    <a class="header-cta" href="/">Analyser un bulletin</a>
+  </div>
+</header>
+
+<main>
+  <h1>Fraude à la fiche de paie : comment la détecter</h1>
+  <p class="lead">
+    Un faux bulletin de salaire se reconnaît rarement à l'œil nu. En revanche, il
+    trahit presque toujours son auteur sur un point : les calculs qu'il a oublié de
+    refaire.
+  </p>
+
+  <p>
+    La fiche de paie est le document le plus falsifié dans les dossiers de location.
+    Elle conditionne l'accès au logement, au crédit et à de nombreuses aides, et les
+    outils pour la modifier sont à la portée de tous : un éditeur PDF suffit pour
+    changer un montant.
+  </p>
+  <p>
+    La bonne nouvelle, c'est qu'un bulletin de paie est un document <strong>fortement
+    contraint</strong>. Une trentaine de valeurs y sont liées entre elles par des
+    règles de calcul. Modifier un seul montant en rompt plusieurs — et c'est
+    précisément là que la falsification devient visible.
+  </p>
+
+  <h2>Pourquoi un faux bulletin se trahit presque toujours</h2>
+  <p>
+    Celui qui gonfle son salaire modifie ce qui l'intéresse : le net à payer, parfois
+    le brut. Il ne recalcule pratiquement jamais le reste, car cela demanderait de
+    reprendre l'ensemble du bulletin.
+  </p>
+  <p>
+    Or plusieurs égalités doivent être vraies simultanément :
+  </p>
+  <ul>
+    <li>Le brut moins les cotisations salariales donne le net avant impôt</li>
+    <li>Le net à payer ne peut pas dépasser le montant net social</li>
+    <li>Le cumul annuel progresse exactement du brut du mois</li>
+    <li>Le taux de cotisations reste dans une fourchette étroite et réglementée</li>
+  </ul>
+  <p>
+    Une seule modification suffit à en briser au moins une.
+  </p>
+
+  <h2>Les six vérifications les plus efficaces</h2>
+
+  <h3>1. La progression des cumuls annuels</h3>
+  <p>
+    C'est le contrôle le plus redoutable, et le plus souvent négligé par les
+    faussaires. Tout bulletin français affiche les cumuls depuis janvier. Entre deux
+    mois consécutifs, la règle est absolue :
+  </p>
+  <div class="example">cumul(mois N) − cumul(mois N−1) = brut du mois N</div>
+  <p>
+    Si vous disposez de deux ou trois bulletins successifs, cette égalité est presque
+    impossible à falsifier de façon cohérente. Quelqu'un qui gonfle son brut de
+    300 € en mars devrait aussi ajuster les cumuls de mars, avril, mai et tous les
+    mois suivants. C'est rarement fait.
+  </p>
+  <div class="callout">
+    <p>
+      <strong>En pratique :</strong> demandez systématiquement les trois derniers
+      bulletins, pas seulement le dernier. Le recoupement entre eux vaut mieux que
+      n'importe quelle analyse d'un document isolé.
+    </p>
+  </div>
+
+  <h3>2. Le taux de charge salariale</h3>
+  <p>
+    Le rapport entre les cotisations salariales et le brut est encadré par la loi. Il
+    se situe presque toujours entre 20 % et 26 % pour un salarié du régime général,
+    soit un net avant impôt représentant 74 % à 80 % du brut.
+  </p>
+  <p>
+    Un bulletin où les cotisations ne représenteraient que 10 % du brut est
+    anormal — sauf dans des cas précis que nous détaillons plus loin.
+  </p>
+
+  <h3>3. Le net à payer face au net social</h3>
+  <p>
+    Depuis 2023, le « montant net social » est une mention obligatoire. Par
+    construction, le net à payer lui est inférieur ou égal, puisqu'on en déduit
+    encore l'impôt prélevé à la source.
+  </p>
+  <p>
+    Un net à payer supérieur au net social est donc <strong>mathématiquement
+    impossible</strong>. C'est l'erreur typique de quelqu'un qui modifie la ligne
+    finale sans toucher au reste.
+  </p>
+
+  <h3>4. Le SIRET de l'employeur</h3>
+  <p>
+    Le numéro SIRET figure obligatoirement sur le bulletin. Il se vérifie
+    gratuitement dans la base officielle des entreprises. Trois anomalies à guetter :
+    un numéro qui n'existe pas, une entreprise fermée à la date du bulletin, ou une
+    raison sociale qui ne correspond pas au nom affiché.
+  </p>
+  <p>
+    Attention toutefois : une entreprise peut avoir un nom commercial différent de sa
+    raison sociale, ou appartenir à un groupe. Un écart de nom mérite un appel, pas
+    une conclusion.
+  </p>
+
+  <h3>5. Les mentions obligatoires</h3>
+  <p>
+    Un bulletin français doit comporter la convention collective applicable, le
+    SIRET, le détail des cotisations, les congés payés acquis et le net social. Un
+    document reconstitué de zéro en oublie souvent une partie, ou les place de façon
+    incohérente.
+  </p>
+
+  <h3>6. Les métadonnées du fichier PDF</h3>
+  <p>
+    Un bulletin authentique est généré par un logiciel de paie : Sage, Silae, ADP,
+    PayFit, Cegid. Ces noms apparaissent dans les propriétés du fichier. Un PDF
+    produit par Microsoft Word, Photoshop ou Canva est un signal fort.
+  </p>
+  <div class="callout warn">
+    <p>
+      <strong>Limite importante :</strong> ce contrôle disparaît dès que le document
+      a été imprimé puis scanné. Un dossier transmis en scan n'est pas suspect pour
+      autant — il est simplement moins vérifiable sur ce point.
+    </p>
+  </div>
+
+  <h2>Les faux signaux à connaître</h2>
+  <p>
+    Plusieurs situations parfaitement légales ressemblent à des anomalies. Les
+    ignorer conduit à soupçonner des dossiers honnêtes.
+  </p>
+
+  <table>
+    <tr>
+      <th>Ce que vous observez</th>
+      <th>Explication légitime</th>
+    </tr>
+    <tr>
+      <td>Net égal au brut, aucune cotisation</td>
+      <td>Contrat d'apprentissage ou de professionnalisation : exonération de cotisations salariales</td>
+    </tr>
+    <tr>
+      <td>Salaire inférieur au SMIC</td>
+      <td>Temps partiel, mois incomplet, absence maladie, ou alternance (rémunération en pourcentage du SMIC)</td>
+    </tr>
+    <tr>
+      <td>Net très supérieur à brut moins cotisations</td>
+      <td>Intéressement, participation ou remboursement de frais, qui s'ajoutent au net sans passer par le brut</td>
+    </tr>
+    <tr>
+      <td>Net inférieur au calcul attendu</td>
+      <td>Avantages en nature (véhicule, téléphone) : ajoutés au brut pour être cotisés, puis retirés du net</td>
+    </tr>
+    <tr>
+      <td>Cumul annuel faible en fin d'année</td>
+      <td>Embauche en cours d'année</td>
+    </tr>
+  </table>
+
+  <p>
+    Ces cas sont fréquents. Un apprenti sur cinq dossiers n'a rien d'exceptionnel, et
+    son bulletin présentera un net égal au brut — ce qui déclencherait une alerte sur
+    un contrôle mal conçu.
+  </p>
+
+  <h2>Ce qu'aucune vérification ne peut faire</h2>
+  <p>
+    Soyons clairs sur les limites, car aucun outil ne détecte tout.
+  </p>
+  <p>
+    Un faux <strong>parfaitement cohérent est indétectable</strong> à l'analyse du
+    seul document. Rien n'empêche de générer un bulletin avec un vrai SIRET, des
+    calculs exacts et des cumuls ajustés. Le fichier serait authentique dans sa
+    forme ; seul son contenu serait mensonger.
+  </p>
+  <p>
+    La seule vérification réellement définitive serait le croisement avec la
+    déclaration sociale nominative que l'employeur transmet à l'URSSAF. Cette base
+    existe mais n'est pas accessible aux entreprises privées.
+  </p>
+  <p>
+    En pratique, une analyse documentaire établit donc la <strong>plausibilité</strong>
+    d'un bulletin, pas sa véracité absolue. C'est déjà considérable : la grande
+    majorité des falsifications sont grossières et tombent sur l'un des six contrôles
+    ci-dessus.
+  </p>
+
+  <h2>Que faire en cas de doute</h2>
+  <ol>
+    <li><strong>Demandez les trois derniers bulletins</strong> et vérifiez la progression des cumuls</li>
+    <li><strong>Vérifiez le SIRET</strong> dans la base officielle des entreprises</li>
+    <li><strong>Appelez l'employeur</strong> au numéro trouvé dans l'annuaire, jamais à celui indiqué sur le bulletin</li>
+    <li><strong>Croisez avec l'avis d'imposition</strong>, dont les revenus déclarés doivent être cohérents</li>
+    <li><strong>Conservez une trace écrite</strong> de vos vérifications, utile en cas de litige ultérieur</li>
+  </ol>
+  <p>
+    Le troisième point est le plus important et le plus négligé : un faussaire indique
+    parfois un numéro qu'il contrôle. Cherchez toujours les coordonnées de
+    l'entreprise par vous-même.
+  </p>
+
+  <div class="cta-block">
+    <h2>Vérifier un bulletin automatiquement</h2>
+    <p>
+      FraudDetect applique ces contrôles en quelques secondes et signale les
+      incohérences, en tenant compte des cas légitimes évoqués plus haut.
+      Dix analyses gratuites, sans carte bancaire.
+    </p>
+    <a class="cta-btn" href="/">Analyser un bulletin</a>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="site-footer-inner">
+    <nav>
+      <a href="/">Analyser un bulletin</a>
+      <a href="/verifier-fiche-de-paie-locataire/">Vérifier un dossier locataire</a>
+      <a href="/faux-bulletin-de-salaire/">Reconnaître un faux bulletin</a>
+    </nav>
+    <p>FraudDetect — analyse de dossiers de candidats locataires.</p>
+  </div>
+</footer>
+
+</body>
+</html>

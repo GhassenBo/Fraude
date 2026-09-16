@@ -100,7 +100,21 @@ export default function App() {
       {page === 'batch-result' && <BatchResultPage batchResult={batchResult} onReset={handleReset} onUpgrade={() => setPage('pricing')} />}
       {page === 'dashboard' && <DashboardPage user={user} onUpgrade={() => setPage('pricing')} onAnalyze={() => setPage('upload')} />}
       {page === 'pricing' && <PricingPage user={user} onBack={() => setPage('upload')} />}
+      <SiteFooter />
     </div>
+  );
+}
+
+// Liens vers les pages editoriales, servies en HTML statique hors de l'application.
+function SiteFooter() {
+  return (
+    <footer className="app-footer">
+      <nav>
+        <a href="/fraude-fiche-de-paie/">Fraude à la fiche de paie</a>
+        <a href="/verifier-fiche-de-paie-locataire/">Vérifier un dossier locataire</a>
+        <a href="/faux-bulletin-de-salaire/">Reconnaître un faux bulletin</a>
+      </nav>
+    </footer>
   );
 }
 
