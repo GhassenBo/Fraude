@@ -210,6 +210,10 @@ public class SalaryCalculationService {
         // Check 4: Required fields present
         checks.addAll(checkRequiredFields(text));
 
+        // Check 9: cle de controle du numero de securite sociale
+        AnalysisResult.Check nirCheck = checkNir(lines);
+        if (nirCheck != null) checks.add(nirCheck);
+
         // Check 5: Ratio Net/Brut par CCN
         // Quand Vision est actif, on utilise son net (= net avant PAS, valeur fiable).
         // Sinon, fallback sur le regex netAvantImpot, puis sur netFinal si rien d'autre.
@@ -360,6 +364,52 @@ public class SalaryCalculationService {
     private String normalizeDiacritics(String text) {
         return Normalizer.normalize(text.toLowerCase(), Normalizer.Form.NFD)
             .replaceAll("[\\p{InCombiningDiacriticalMarks}]", "");
+    }
+
+    // ── Check 9 : numero de securite sociale ──────────────────────────────────
+
+    // Le NIR est precede d'un libelle : sans cette contrainte on capturerait
+    // d'autres suites de chiffres (references, matricules, codes-barres).
+    private static final Pattern NIR_PATTERN = Pattern.compile(
+        "(?i)(?:numero de securite sociale|n[°o]?\\s*s[eé]?curit[eé] sociale|securite sociale"
+        + "|n[°o]?\\s*s\\.?s\\.?|nir)\\s*:?\\s*"
+        + "([12][\\s.]?\\d{2}[\\s.]?\\d{2}[\\s.]?(?:\\d{2}|2[aAbB])[\\s.]?\\d{3}[\\s.]?\\d{3}[\\s.]?\\d{2})");
+
+    /**
+     * Le NIR porte une cle de controle : 97 moins le reste modulo 97 des treize
+     * premiers chiffres. Les generateurs de faux bulletins produisent un numero
+     * d'apparence plausible sans calculer cette cle, ce qui les trahit.
+     * La Corse fait exception : 2A et 2B valent respectivement 19 et 18.
+     */
+    private AnalysisResult.Check checkNir(String[] lines) {
+        for (String line : lines) {
+            Matcher m = NIR_PATTERN.matcher(normalizeDiacritics(line));
+            if (!m.find()) continue;
+
+            String raw = m.group(1).replaceAll("[\\s.]", "");
+            String corps = raw.substring(0, 13).replace("2a", "19").replace("2b", "18");
+            if (!corps.matches("\\d{13}")) continue;
+
+            int cleLue = Integer.parseInt(raw.substring(13));
+            int cleAttendue = 97 - (int) (Long.parseLong(corps) % 97);
+
+            if (cleLue != cleAttendue) {
+                return AnalysisResult.Check.builder()
+                    .category("Structure")
+                    .label("Numéro de sécurité sociale")
+                    .status("FAILED")
+                    .detail("Clé de contrôle du numéro de sécurité sociale incorrecte"
+                        + " — le numéro ne peut pas avoir été attribué")
+                    .build();
+            }
+            return AnalysisResult.Check.builder()
+                .category("Structure")
+                .label("Numéro de sécurité sociale")
+                .status("OK")
+                .detail("Clé de contrôle du numéro de sécurité sociale valide")
+                .build();
+        }
+        return null;
     }
 
     private List<AnalysisResult.Check> checkRequiredFields(String text) {

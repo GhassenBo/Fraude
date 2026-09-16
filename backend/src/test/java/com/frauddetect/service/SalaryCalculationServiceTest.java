@@ -731,4 +731,49 @@ class SalaryCalculationServiceTest {
         assertThat(check.getStatus()).isEqualTo("FAILED");
         assertThat(check.getDetail()).contains("impossible");
     }
+
+    // ── Numero de securite sociale ───────────────────────────────────────────
+
+    @Test
+    void nir_cleInvalide_detecte() {
+        // Numero produit par un generateur de faux bulletins : forme plausible,
+        // cle de controle non calculee (65 au lieu de 42).
+        String text = "Numero de securite sociale 187027500121865\n"
+            + "Remuneration brute 3 000,00\nsiret\ncotisation\nconges payes\nconvention collective";
+
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(text, null, false);
+
+        AnalysisResult.Check check = findCheck(checks, "Numéro de sécurité sociale");
+        assertThat(check.getStatus()).isEqualTo("FAILED");
+    }
+
+    @Test
+    void nir_cleValide_shouldBeOK() {
+        // Meme corps, cle correcte
+        String text = "Numero de securite sociale 187027500121842\n"
+            + "Remuneration brute 3 000,00\nsiret\ncotisation\nconges payes\nconvention collective";
+
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(text, null, false);
+
+        assertThat(findCheck(checks, "Numéro de sécurité sociale").getStatus()).isEqualTo("OK");
+    }
+
+    @Test
+    void nir_avecEspaces_estReconnu() {
+        String text = "N° Sécurité Sociale : 1 87 02 75 001 218 42\n"
+            + "Remuneration brute 3 000,00\nsiret\ncotisation\nconges payes\nconvention collective";
+
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(text, null, false);
+
+        assertThat(findCheck(checks, "Numéro de sécurité sociale").getStatus()).isEqualTo("OK");
+    }
+
+    @Test
+    void nir_absent_checkIgnore() {
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(
+            "Remuneration brute 3 000,00\nsiret\ncotisation\nconges payes\nconvention collective",
+            null, false);
+
+        assertThat(checks).noneMatch(c -> "Numéro de sécurité sociale".equals(c.getLabel()));
+    }
 }
