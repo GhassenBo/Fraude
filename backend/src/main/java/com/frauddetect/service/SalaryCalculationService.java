@@ -68,9 +68,17 @@ public class SalaryCalculationService {
         // Net avant impôt sur le revenu (= net avant PAS).
         // Distinct du net à payer final : le PAS varie de 0% à 45% selon l'employé
         // et ne doit pas fausser le ratio CCN ni le check cohérence cotisations.
+        // Les variantes avec apostrophe sont indispensables : normalizeDiacritics
+        // retire les accents mais pas l'apostrophe, et le libelle reglementaire
+        // s'imprime "NET A PAYER AVANT L'IMPOT SUR LE REVENU" sur une partie des
+        // bulletins. Sans elles, ni le controle des cotisations ni celui du
+        // prelevement a la source ne s'executaient sur ces bulletins.
         Double netAvantImpot = extractAmountPreferSameLine(lines,
             "net a payer avant impot sur le revenu",
+            "net a payer avant l'impot sur le revenu",
             "net a payer avant impot",
+            "net a payer avant l'impot",
+            "net avant l'impot",
             "net avant prelevement a la source",
             "net avant prelevement",
             "net imposable");
@@ -235,7 +243,91 @@ public class SalaryCalculationService {
         AnalysisResult.Check cumulCheck = checkCumuls(lines, salaireBrut, docInfo);
         if (cumulCheck != null) checks.add(cumulCheck);
 
+        // Grandeurs fiscales exposees au reste du pipeline. Le rapprochement avec
+        // l'avis d'imposition porte sur le net imposable, pas sur le net a payer :
+        // sans elles, ce montant doit etre saisi a la main.
+        if (docInfo != null) {
+            docInfo.setNetImposable(extractNetImposable(lines, netAvantImpot));
+            docInfo.setCumulNetImposable(extractCumulNetImposable(lines));
+        }
+
         return checks;
+    }
+
+    // ── Grandeurs fiscales : rapprochement avec l'avis d'imposition ───────────
+
+    /**
+     * Net imposable du mois.
+     *
+     * Extraction sur la meme ligne uniquement : "Net imposable" sert aussi
+     * d'en-tete de colonne sur certains bulletins, et la fenetre de +-4 lignes y
+     * capterait le cout patronal ou le brut. Une valeur fausse produirait un ecart
+     * signale a tort au rapprochement, ce qui est plus nuisible que l'absence de
+     * valeur : un montant introuvable laisse la saisie manuelle disponible.
+     *
+     * @param netAvantImpot valeur de repli. Le net avant PAS n'inclut ni la CSG
+     *                      non deductible ni les avantages en nature, soit un
+     *                      ecart de quelques euros, negligeable devant la
+     *                      tolerance du rapprochement annuel.
+     */
+    private Double extractNetImposable(String[] lines, Double netAvantImpot) {
+        Double direct = extractAmountOnSameLine(lines,
+            "net imposable", "net fiscal", "net imposable mensuel");
+        return direct != null ? direct : netAvantImpot;
+    }
+
+    /**
+     * Cumul du net imposable depuis janvier.
+     *
+     * C'est le rapprochement le plus solide avec l'avis : il se compare aux
+     * salaires declares sans extrapoler un mois sur douze, donc sans que primes
+     * ou treizieme mois creusent un ecart artificiel.
+     */
+    private Double extractCumulNetImposable(String[] lines) {
+        Double sameLine = extractFirstAmountOnSameLine(lines,
+            "cumul net imposable", "net imposable cumul", "cumul du net imposable",
+            "net imposable annuel", "cumul imposable");
+        if (sameLine != null) return sameLine;
+        return extractCumulImposablePhrase(lines);
+    }
+
+    // Rendu en phrase par certains editeurs, au pluriel :
+    // "Depuis le 1er janvier 2026 : Bruts 52 800,00, ... et Nets imposables 43 318,11."
+    // Le pluriel interdit de reutiliser les libelles au singulier ci-dessus.
+    private static final Pattern CUMUL_IMPOSABLE_PHRASE = Pattern.compile(
+        "(?i)nets? imposables?\\s*:?\\s*"
+            + "((?:[0-9]{1,3}(?:[\\s ][0-9]{3})+|[0-9]+)[.,][0-9]{2})");
+
+    /** Nombre de lignes remontees pour retrouver l'intitule du bloc de cumuls. */
+    private static final int PORTEE_BLOC_CUMULS = 3;
+
+    /**
+     * "Nets imposables" seul ne suffit pas : c'est aussi le libelle du mois. Le
+     * montant n'est retenu que sous une marque de cumul, portee soit par la ligne
+     * meme ("Depuis le 1er janvier 2026 : ... Nets imposables 43 318,11"), soit
+     * par l'intitule du bloc quelques lignes plus haut ("Cumuls depuis janv.
+     * 2026"), les deux mises en page existant sur des bulletins reels. La phrase
+     * est parfois coupee entre deux lignes, d'ou la remontee.
+     */
+    private Double extractCumulImposablePhrase(String[] lines) {
+        for (int i = 0; i < lines.length; i++) {
+            Matcher m = CUMUL_IMPOSABLE_PHRASE.matcher(lines[i]);
+            if (!m.find()) continue;
+            if (!dansUnBlocDeCumuls(lines, i)) continue;
+            try {
+                return Double.parseDouble(
+                    m.group(1).replaceAll("[\\s ]", "").replace(",", "."));
+            } catch (NumberFormatException ignored) {}
+        }
+        return null;
+    }
+
+    private boolean dansUnBlocDeCumuls(String[] lines, int index) {
+        for (int j = Math.max(0, index - PORTEE_BLOC_CUMULS); j <= index; j++) {
+            String norm = normalizeDiacritics(lines[j]);
+            if (norm.contains("cumul") || norm.contains("depuis le")) return true;
+        }
+        return false;
     }
 
     // ── Check 8 : Cohérence des cumuls annuels ────────────────────────────────

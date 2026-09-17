@@ -1,5 +1,6 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { api } from '../services/auth';
+import { suggestionNetImposable } from '../services/bulletinFiscal';
 import './AvisImpositionPanel.css';
 
 /**
@@ -8,14 +9,32 @@ import './AvisImpositionPanel.css';
  * La verification d'authenticite aupres de l'administration reste manuelle :
  * aucune API publique ne l'expose. L'application prepare les identifiants et
  * ouvre le service officiel, le gestionnaire conclut.
+ *
+ * @param bulletinFiscal donnees fiscales du dernier bulletin analyse, ou null.
+ *                       Elles pre-remplissent le net imposable ; le champ reste
+ *                       modifiable, et l'origine du montant est affichee pour
+ *                       qu'un bulletin appartenant a un autre dossier ne soit
+ *                       pas rapproche par inadvertance.
  */
-export default function AvisImpositionPanel() {
+export default function AvisImpositionPanel({ bulletinFiscal }) {
   const [file, setFile] = useState(null);
   const [netImposable, setNetImposable] = useState('');
+  const [saisiALaMain, setSaisiALaMain] = useState(false);
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const inputRef = useRef();
+
+  const suggestion = useMemo(
+    () => suggestionNetImposable(bulletinFiscal), [bulletinFiscal]);
+
+  // La saisie manuelle prime : une valeur proposee ne doit pas ecraser ce que le
+  // gestionnaire a tape, y compris s'il a volontairement vide le champ.
+  useEffect(() => {
+    if (suggestion && !saisiALaMain) {
+      setNetImposable(String(suggestion.valeur).replace('.', ','));
+    }
+  }, [suggestion, saisiALaMain]);
 
   const pick = (f) => {
     if (!f) return;
@@ -63,13 +82,22 @@ export default function AvisImpositionPanel() {
               <span>Net imposable mensuel</span>
               <input type="text" inputMode="decimal" placeholder="2630"
                      value={netImposable}
-                     onChange={(e) => setNetImposable(e.target.value)} />
+                     onChange={(e) => { setSaisiALaMain(true); setNetImposable(e.target.value); }} />
             </label>
           </div>
-          <p className="avis-hint">
-            Relevez le net imposable sur un bulletin récent. Sans cette valeur, seules
-            les données de l&rsquo;avis sont extraites, sans rapprochement.
-          </p>
+          {suggestion && !saisiALaMain ? (
+            <p className="avis-hint">
+              Montant reporté depuis {suggestion.origine}
+              {bulletinFiscal?.source ? ` — ${bulletinFiscal.source}` : ''}. Corrigez-le
+              s&rsquo;il ne correspond pas au candidat de cet avis.
+            </p>
+          ) : (
+            <p className="avis-hint">
+              Relevez le net imposable sur un bulletin récent — le montant est reporté
+              automatiquement après l&rsquo;analyse d&rsquo;un bulletin. Sans cette valeur,
+              seules les données de l&rsquo;avis sont extraites, sans rapprochement.
+            </p>
+          )}
 
           {error && <div className="avis-error">{error}</div>}
 

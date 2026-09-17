@@ -39,6 +39,12 @@ public class AnalysisResult {
         private Double cumulBrut;
         private Integer moisPeriode;
 
+        // Net imposable du mois et cumul depuis janvier : la grandeur que l'avis
+        // d'imposition declare, et la seule qui permette de rapprocher un bulletin
+        // d'un avis sans saisie manuelle. Nuls quand le bulletin ne les porte pas.
+        private Double netImposable;
+        private Double cumulNetImposable;
+
         private String pdfCreatedWith;
         private String pdfCreationDate;
         private String pdfModifiedDate;

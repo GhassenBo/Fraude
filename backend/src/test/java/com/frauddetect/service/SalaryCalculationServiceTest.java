@@ -731,4 +731,96 @@ class SalaryCalculationServiceTest {
         assertThat(check.getStatus()).isEqualTo("FAILED");
         assertThat(check.getDetail()).contains("impossible");
     }
+
+    // ── Grandeurs fiscales pour le rapprochement avec l'avis ─────────────────
+
+    private AnalysisResult.DocumentInfo analyse(String text) {
+        AnalysisResult.DocumentInfo info = AnalysisResult.DocumentInfo.builder()
+            .salaireBrut("3200.00").salaireNet("2527.86").build();
+        service.analyzeCalculations(text, info, true);
+        return info;
+    }
+
+    @Test
+    void netImposableDuMois_estExpose() {
+        assertThat(analyse("Net imposable 2 619,04\n" + BULLETIN_SAIN).getNetImposable())
+            .isEqualTo(2619.04);
+    }
+
+    @Test
+    void sansNetImposable_leNetAvantPasSertDeRepli() {
+        // Le net avant PAS n'inclut ni la CSG non deductible ni les avantages en
+        // nature : l'ecart reste negligeable devant la tolerance annuelle.
+        assertThat(analyse(BULLETIN_SAIN).getNetImposable()).isEqualTo(2527.86);
+    }
+
+    @Test
+    void libelleAvecApostrophe_estReconnu() {
+        // Libelle reglementaire tel qu'il s'imprime sur une partie des bulletins.
+        // normalizeDiacritics retire les accents mais pas l'apostrophe.
+        String text = "Remuneration brute 5 103,98\n"
+            + "Montant total des cotisations 1 103,98 2 160,50\n"
+            + "NET À PAYER AVANT L'IMPÔT SUR LE REVENU 4 000,00\n"
+            + "siret\ncotisation\nconges payes\nconvention collective";
+
+        assertThat(analyse(text).getNetImposable()).isEqualTo(4000.00);
+    }
+
+    @Test
+    void enTeteDeColonneSansMontant_neProduitPasDeValeurFausse() {
+        // "Net imposable" sert aussi d'en-tete de colonne. Prendre le plus gros
+        // montant des lignes voisines y capterait le cout patronal.
+        String text = "Heures Brut Plafond S.S. Net imposable Ch. patronales Cout Global\n"
+            + "Mensuel\n"
+            + "151,67 3 200,00 3 864,00 2 527,86 1 344,00 4 544,00\n"
+            + BULLETIN_SAIN;
+
+        assertThat(analyse(text).getNetImposable()).isEqualTo(2527.86);
+    }
+
+    @Test
+    void cumulEnPhraseSurUneSeuleLigne_estExtrait() {
+        String text = "Cumuls en euros\n"
+            + "Depuis le 1er janvier 2026 : Bruts 52 800,00, Heures travaillees 1 672"
+            + " et Nets imposables 43 318,11.\n" + BULLETIN_SAIN;
+
+        assertThat(analyse(text).getCumulNetImposable()).isEqualTo(43318.11);
+    }
+
+    @Test
+    void cumulSousUnIntituleDeBloc_estExtrait() {
+        // Autre mise en page reelle : l'intitule porte la marque du cumul, pas la
+        // ligne du montant.
+        String text = "Cumuls depuis janv. 2026\n"
+            + "Salaire brut 25 600,00\n"
+            + "Nets imposables 20 952,32\n" + BULLETIN_SAIN;
+
+        assertThat(analyse(text).getCumulNetImposable()).isEqualTo(20952.32);
+    }
+
+    @Test
+    void cumulSurLaLigneSuivanteDeLaPhrase_estExtrait() {
+        // La phrase de cumuls est parfois coupee par l'extraction de texte.
+        String text = "Depuis le 1er janvier 2026 : Bruts 11 428,64, HS 12h et\n"
+            + "Nets imposables 9 356,52.\n" + BULLETIN_SAIN;
+
+        assertThat(analyse(text).getCumulNetImposable()).isEqualTo(9356.52);
+    }
+
+    @Test
+    void netImposableDuMois_nEstPasPrisPourUnCumul() {
+        // Hors de tout bloc de cumuls, le montant du mois ne doit pas etre
+        // annualise : le rapprochement le multiplierait par douze deux fois.
+        assertThat(analyse("Net imposable 2 619,04\n" + BULLETIN_SAIN)
+            .getCumulNetImposable()).isNull();
+    }
+
+    @Test
+    void bulletinSansGrandeurFiscale_laisseLesChampsNuls() {
+        AnalysisResult.DocumentInfo info = analyse(
+            "Facture de telephone\nMontant 45,90");
+
+        assertThat(info.getNetImposable()).isNull();
+        assertThat(info.getCumulNetImposable()).isNull();
+    }
 }

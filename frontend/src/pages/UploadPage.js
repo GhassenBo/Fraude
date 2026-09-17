@@ -3,7 +3,7 @@ import { api } from '../services/auth';
 import AvisImpositionPanel from './AvisImpositionPanel';
 import './UploadPage.css';
 
-export default function UploadPage({ onResult, onBatchResult, user, onUpgrade }) {
+export default function UploadPage({ onResult, onBatchResult, user, bulletinFiscal, onUpgrade }) {
   const [mode, setMode] = useState('single'); // 'single' | 'batch'
 
   // Single mode
@@ -272,7 +272,7 @@ export default function UploadPage({ onResult, onBatchResult, user, onUpgrade })
         ))}
       </div>
 
-      <AvisImpositionPanel />
+      <AvisImpositionPanel bulletinFiscal={bulletinFiscal} />
     </main>
   );
 }

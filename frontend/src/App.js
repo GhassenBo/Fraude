@@ -7,6 +7,7 @@ import DashboardPage from './pages/DashboardPage';
 import PricingPage from './pages/PricingPage';
 import BatchResultPage from './pages/BatchResultPage';
 import { getToken, getUser, logout, refreshMe, resendVerification } from './services/auth';
+import { bulletinFiscal, bulletinFiscalDuLot } from './services/bulletinFiscal';
 import './App.css';
 
 export default function App() {
@@ -16,6 +17,10 @@ export default function App() {
   const [batchResult, setBatchResult] = useState(null);
   const [filename, setFilename] = useState('');
   const [notice, setNotice] = useState(null);
+  // Grandeurs fiscales du dernier bulletin analyse. Conservees au retour sur la
+  // page d'analyse, sinon le rapprochement avec l'avis exigerait une ressaisie
+  // du net imposable : la page de resultat a deja ete quittee a ce moment-la.
+  const [bulletinFiscalCourant, setBulletinFiscalCourant] = useState(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -63,11 +68,13 @@ export default function App() {
     setPage('upload');
     setResult(null);
     setBatchResult(null);
+    setBulletinFiscalCourant(null);
   };
 
   const handleResult = (data, name) => {
     setResult(data);
     setFilename(name);
+    setBulletinFiscalCourant(bulletinFiscal(data?.documentInfo, name));
     setPage('result');
     refreshMe().then(setUser).catch(() => {});
     if (data.remainingDocuments === 0 && !data.isPro) {
@@ -77,6 +84,7 @@ export default function App() {
 
   const handleBatchResult = (data) => {
     setBatchResult(data);
+    setBulletinFiscalCourant(bulletinFiscalDuLot(data));
     setPage('batch-result');
     refreshMe().then(setUser).catch(() => {});
   };
@@ -95,7 +103,7 @@ export default function App() {
       <Header user={user} onLogout={handleLogout} onNav={setPage} currentPage={page} />
       {notice && <Notice notice={notice} onClose={() => setNotice(null)} />}
       {user && !user.emailVerified && <VerifyBanner email={user.email} />}
-      {page === 'upload' && <UploadPage onResult={handleResult} onBatchResult={handleBatchResult} user={user} onUpgrade={() => setPage('pricing')} />}
+      {page === 'upload' && <UploadPage onResult={handleResult} onBatchResult={handleBatchResult} user={user} bulletinFiscal={bulletinFiscalCourant} onUpgrade={() => setPage('pricing')} />}
       {page === 'result' && <ResultPage result={result} filename={filename} onReset={handleReset} onUpgrade={() => setPage('pricing')} />}
       {page === 'batch-result' && <BatchResultPage batchResult={batchResult} onReset={handleReset} onUpgrade={() => setPage('pricing')} />}
       {page === 'dashboard' && <DashboardPage user={user} onUpgrade={() => setPage('pricing')} onAnalyze={() => setPage('upload')} />}
