@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Liste de confiance de test, reproduisant la structure reelle publiee par
+  l'ANTS : identifiant d'autorite et URI de publication portes par le
+  fournisseur, certificat et statut portes par le service.
+
+  Le certificat est celui de l'autorite racine de test, non celui de production.
+-->
+<tsl:TrustServiceStatusList xmlns:tsl="http://uri.etsi.org/02231/v2#">
+  <tsl:TrustServiceProviderList>
+
+    <tsl:TrustServiceProvider>
+      <tsl:TSPInformation>
+        <tsl:TSPName>
+          <tsl:Name xml:lang="fr">Autorite de test</tsl:Name>
+        </tsl:TSPName>
+        <tsl:TSPTradeName>
+          <tsl:Name xml:lang="fr">FR06</tsl:Name>
+        </tsl:TSPTradeName>
+        <tsl:TSPInformationURI>
+          <tsl:URI xml:lang="fr">http://exemple.test/annuaire-fr06.der</tsl:URI>
+        </tsl:TSPInformationURI>
+      </tsl:TSPInformation>
+      <tsl:TSPServices>
+        <tsl:TSPService>
+          <tsl:ServiceInformation>
+            <tsl:ServiceName>
+              <tsl:Name xml:lang="fr">TEST SAS - FR06 2D-DOC Signature</tsl:Name>
+            </tsl:ServiceName>
+            <tsl:ServiceDigitalIdentity>
+              <tsl:DigitalId>
+                <tsl:X509Certificate>MIIBxzCCAW2gAwIBAgIIASD37E/UengwCgYIKoZIzj0EAwMwRjELMAkGA1UEBhMCRlIxGTAXBgNVBAoTEEZyYXVkRGV0ZWN0IFRlc3QxHDAaBgNVBAMTE1Rlc3QgMkQtRE9DIFJvb3QgQ0EwHhcNMjYwOTE3MTExMDM4WhcNMzYwOTE0MTExMDM4WjBGMQswCQYDVQQGEwJGUjEZMBcGA1UEChMQRnJhdWREZXRlY3QgVGVzdDEcMBoGA1UEAxMTVGVzdCAyRC1ET0MgUm9vdCBDQTBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABM4DyASNDBG1MojY27WnmOwAmTexvwSQQ4pw+Oe6YuFwpCW+lccB8xZt5T/DGEnaxrFrzEZD6Pm1nd0asGUXcyOjRTBDMB0GA1UdDgQWBBR4hIu+pCIUPeqVh6SKVNQ2enPu4DAOBgNVHQ8BAf8EBAMCAQYwEgYDVR0TAQH/BAgwBgEB/wIBATAKBggqhkjOPQQDAwNIADBFAiBKEWo7iFVDiaXKMP6hFDei4JM2aRD+AxaKuzcdh4OFkAIhAJmw+/ILZYA1zgDG5vAgTFjoxX5f5wgncYwx9RAvgXPW</tsl:X509Certificate>
+              </tsl:DigitalId>
+            </tsl:ServiceDigitalIdentity>
+            <tsl:ServiceStatus>http://uri.etsi.org/TrstSvc/Svcstatus/inaccord</tsl:ServiceStatus>
+          </tsl:ServiceInformation>
+        </tsl:TSPService>
+      </tsl:TSPServices>
+    </tsl:TrustServiceProvider>
+
+    <tsl:TrustServiceProvider>
+      <tsl:TSPInformation>
+        <tsl:TSPTradeName>
+          <tsl:Name xml:lang="fr">FR99</tsl:Name>
+        </tsl:TSPTradeName>
+        <tsl:TSPInformationURI>
+          <tsl:URI xml:lang="fr">http://exemple.test/annuaire-fr99.der</tsl:URI>
+        </tsl:TSPInformationURI>
+      </tsl:TSPInformation>
+      <tsl:TSPServices>
+        <tsl:TSPService>
+          <tsl:ServiceInformation>
+            <tsl:ServiceName>
+              <tsl:Name xml:lang="fr">TEST SAS - FR99 2D-DOC Signature</tsl:Name>
+            </tsl:ServiceName>
+            <tsl:ServiceDigitalIdentity>
+              <tsl:DigitalId>
+                <tsl:X509Certificate>MIIBxzCCAW2gAwIBAgIIASD37E/UengwCgYIKoZIzj0EAwMwRjELMAkGA1UEBhMCRlIxGTAXBgNVBAoTEEZyYXVkRGV0ZWN0IFRlc3QxHDAaBgNVBAMTE1Rlc3QgMkQtRE9DIFJvb3QgQ0EwHhcNMjYwOTE3MTExMDM4WhcNMzYwOTE0MTExMDM4WjBGMQswCQYDVQQGEwJGUjEZMBcGA1UEChMQRnJhdWREZXRlY3QgVGVzdDEcMBoGA1UEAxMTVGVzdCAyRC1ET0MgUm9vdCBDQTBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABM4DyASNDBG1MojY27WnmOwAmTexvwSQQ4pw+Oe6YuFwpCW+lccB8xZt5T/DGEnaxrFrzEZD6Pm1nd0asGUXcyOjRTBDMB0GA1UdDgQWBBR4hIu+pCIUPeqVh6SKVNQ2enPu4DAOBgNVHQ8BAf8EBAMCAQYwEgYDVR0TAQH/BAgwBgEB/wIBATAKBggqhkjOPQQDAwNIADBFAiBKEWo7iFVDiaXKMP6hFDei4JM2aRD+AxaKuzcdh4OFkAIhAJmw+/ILZYA1zgDG5vAgTFjoxX5f5wgncYwx9RAvgXPW</tsl:X509Certificate>
+              </tsl:DigitalId>
+            </tsl:ServiceDigitalIdentity>
+            <!-- Service retire : ne doit pas fournir d'ancre de confiance. -->
+            <tsl:ServiceStatus>http://uri.etsi.org/TrstSvc/Svcstatus/withdrawn</tsl:ServiceStatus>
+          </tsl:ServiceInformation>
+        </tsl:TSPService>
+      </tsl:TSPServices>
+    </tsl:TrustServiceProvider>
+
+  </tsl:TrustServiceProviderList>
+</tsl:TrustServiceStatusList>

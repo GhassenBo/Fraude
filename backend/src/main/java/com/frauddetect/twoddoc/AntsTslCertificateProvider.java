@@ -46,11 +46,20 @@ public class AntsTslCertificateProvider implements TwoDDocCertificateProvider {
 
     private static final Duration HTTP_TIMEOUT = Duration.ofSeconds(15);
 
-    /** Elements de la TSL, au sens ETSI TS 119 612. */
-    private static final String TAG_SERVICE_INFO = "TSPServiceInformation";
+    // Elements de la TSL, au sens ETSI TS 119 612, tels que publies par l'ANTS.
+    // L'identifiant d'autorite et l'URI de publication sont portes par le
+    // fournisseur, le certificat et le statut par chacun de ses services.
+    private static final String TAG_PROVIDER = "TrustServiceProvider";
+    private static final String TAG_TRADE_NAME = "TSPTradeName";
+    private static final String TAG_INFORMATION_URI = "TSPInformationURI";
+    private static final String TAG_SERVICE = "TSPService";
     private static final String TAG_SERVICE_NAME = "ServiceName";
+    private static final String TAG_SERVICE_STATUS = "ServiceStatus";
     private static final String TAG_CERTIFICATE = "X509Certificate";
-    private static final String TAG_SUPPLY_POINT = "ServiceSupplyPoint";
+    private static final String TAG_URI = "URI";
+
+    /** Statut ETSI d'un service en vigueur. */
+    private static final String STATUS_GRANTED = "inaccord";
 
     private final String tslUrl;
     private final HttpClient httpClient;
@@ -90,22 +99,70 @@ public class AntsTslCertificateProvider implements TwoDDocCertificateProvider {
         }
     }
 
-    /** Entree de la TSL decrivant une autorite 2D-DOC. */
+    /**
+     * Entree de la TSL decrivant une autorite 2D-DOC.
+     *
+     * L'identifiant, "FR06" par exemple, est porte par TSPTradeName au niveau du
+     * fournisseur ; il reapparait dans le nom de chacun de ses services. Le
+     * certificat servant d'ancre de confiance et le statut du service sont
+     * portes par le service lui-meme.
+     */
     private ServiceEntry findService(String authorityId)
         throws CertificateSourceUnavailableException {
 
         Document tsl = fetchXml(tslUrl);
-        NodeList services = tsl.getElementsByTagNameNS("*", TAG_SERVICE_INFO);
+        NodeList providers = tsl.getElementsByTagNameNS("*", TAG_PROVIDER);
 
-        for (int i = 0; i < services.getLength(); i++) {
-            Element service = (Element) services.item(i);
-            String name = textOf(service, TAG_SERVICE_NAME);
-            if (name == null || !name.toUpperCase().contains(authorityId.toUpperCase())) {
+        for (int i = 0; i < providers.getLength(); i++) {
+            Element provider = (Element) providers.item(i);
+            if (!mentions(provider, TAG_TRADE_NAME, authorityId)
+                && !mentions(provider, TAG_SERVICE_NAME, authorityId)) {
                 continue;
             }
-            return new ServiceEntry(
-                parseCertificate(textOf(service, TAG_CERTIFICATE)),
-                textOf(service, TAG_SUPPLY_POINT));
+
+            String supplyPoint = firstUriOf(provider, TAG_INFORMATION_URI);
+
+            // Parmi les services du fournisseur, seul un service en vigueur et
+            // portant l'identifiant recherche fournit une ancre de confiance.
+            NodeList services = provider.getElementsByTagNameNS("*", TAG_SERVICE);
+            for (int j = 0; j < services.getLength(); j++) {
+                Element service = (Element) services.item(j);
+                if (!mentions(service, TAG_SERVICE_NAME, authorityId)) continue;
+
+                String status = textOf(service, TAG_SERVICE_STATUS);
+                if (status != null && !status.toLowerCase().contains(STATUS_GRANTED)) {
+                    continue;
+                }
+                X509Certificate certificate = parseCertificate(textOf(service, TAG_CERTIFICATE));
+                if (certificate != null) {
+                    return new ServiceEntry(certificate, supplyPoint);
+                }
+            }
+        }
+        return null;
+    }
+
+    /** Vrai si l'un des elements localName contient la valeur cherchee. */
+    private boolean mentions(Element parent, String localName, String value) {
+        NodeList nodes = parent.getElementsByTagNameNS("*", localName);
+        for (int i = 0; i < nodes.getLength(); i++) {
+            String text = nodes.item(i).getTextContent();
+            if (text != null && text.toUpperCase().contains(value.toUpperCase())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Premiere URI portee par l'element localName. */
+    private String firstUriOf(Element parent, String localName) {
+        NodeList holders = parent.getElementsByTagNameNS("*", localName);
+        for (int i = 0; i < holders.getLength(); i++) {
+            NodeList uris = ((Element) holders.item(i)).getElementsByTagNameNS("*", TAG_URI);
+            if (uris.getLength() > 0) {
+                String uri = uris.item(0).getTextContent();
+                if (uri != null && !uri.isBlank()) return uri.trim();
+            }
         }
         return null;
     }
