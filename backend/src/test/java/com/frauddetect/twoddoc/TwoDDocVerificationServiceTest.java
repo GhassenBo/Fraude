@@ -238,4 +238,78 @@ class TwoDDocVerificationServiceTest {
             TwoDDocCertificateProvider.CertificateSourceUnavailableException.class,
             () -> cache.find("FR06", "FPE6"));
     }
+
+    // ── Synthese du rapprochement ────────────────────────────────────────────
+
+    @Test
+    void signatureValideEtToutConcordant_donneUneSyntheseOk() {
+        TwoDDocData data = TwoDDocData.builder()
+            .detected(true).authorityId("FR06")
+            .fields(Map.of("49", "31560", "44", "MARTIN JEAN"))
+            .signatureStatus(SignatureStatus.VALID).build();
+
+        Map<String, String> duPdf = new LinkedHashMap<>();
+        duPdf.put("revenu fiscal", "31560");
+        duPdf.put("identité", "MARTIN JEAN");
+
+        List<AnalysisResult.Check> checks =
+            service.toChecks(data, service.compare(data, duPdf));
+
+        AnalysisResult.Check synthese = checks.stream()
+            .filter(c -> "Cohérence document / 2D-DOC".equals(c.getLabel()))
+            .findFirst().orElseThrow();
+        assertThat(synthese.getStatus()).isEqualTo("OK");
+        assertThat(synthese.getDetail()).contains("2 données");
+        assertThat(synthese.getDetail()).contains("données authentifiées");
+    }
+
+    @Test
+    void concordancePartielle_syntheseEnAvertissement() {
+        // Une donnee concorde, une autre non : la concordance partielle ne doit
+        // pas rassurer.
+        TwoDDocData data = TwoDDocData.builder()
+            .detected(true).fields(Map.of("49", "31560"))
+            .signatureStatus(SignatureStatus.VALID).build();
+
+        Map<String, String> duPdf = new LinkedHashMap<>();
+        duPdf.put("revenu fiscal", "31560");
+        duPdf.put("identité", "DUPONT MARIE");
+
+        List<AnalysisResult.Check> checks =
+            service.toChecks(data, service.compare(data, duPdf));
+
+        assertThat(checks).anyMatch(c -> "FAILED".equals(c.getStatus()));
+        AnalysisResult.Check synthese = checks.stream()
+            .filter(c -> "Cohérence document / 2D-DOC".equals(c.getLabel()))
+            .findFirst().orElseThrow();
+        assertThat(synthese.getStatus()).isEqualTo("WARNING");
+    }
+
+    @Test
+    void concordanceSansSignatureAuthentifiee_estNuancee() {
+        // Le texte correspond au cachet, mais rien n'atteste que le cachet soit
+        // authentique : la synthese ne doit pas laisser croire le contraire.
+        TwoDDocData data = TwoDDocData.builder()
+            .detected(true).fields(Map.of("49", "31560"))
+            .signatureStatus(SignatureStatus.CERTIFICATE_UNKNOWN).build();
+
+        List<AnalysisResult.Check> checks = service.toChecks(
+            data, service.compare(data, Map.of("revenu fiscal", "31560")));
+
+        AnalysisResult.Check synthese = checks.stream()
+            .filter(c -> "Cohérence document / 2D-DOC".equals(c.getLabel()))
+            .findFirst().orElseThrow();
+        assertThat(synthese.getDetail()).contains("n'est pas authentifié");
+    }
+
+    @Test
+    void aucuneDonneeComparable_pasDeSynthese() {
+        TwoDDocData data = TwoDDocData.builder()
+            .detected(true).fields(Map.of())
+            .signatureStatus(SignatureStatus.VALID).build();
+
+        List<AnalysisResult.Check> checks = service.toChecks(data, Map.of());
+
+        assertThat(checks).noneMatch(c -> "Cohérence document / 2D-DOC".equals(c.getLabel()));
+    }
 }

@@ -110,14 +110,53 @@ public class TwoDDocVerificationService {
         }
 
         checks.add(signatureCheck(data));
+        checks.addAll(comparisonChecks(data, comparisons));
+        return checks;
+    }
+
+    /**
+     * Restitue le rapprochement.
+     *
+     * Les concordances sont regroupees en un seul controle : la signature
+     * n'atteste que l'authenticite du cachet, pas que le texte du document lui
+     * corresponde. Sans cette mention, un gestionnaire ne saurait pas que la
+     * seconde verification a eu lieu, alors qu'elle seule ecarte une retouche du
+     * PDF laissant le cachet intact. Les ecarts, eux, restent detailles par
+     * donnee.
+     */
+    private List<AnalysisResult.Check> comparisonChecks(
+        TwoDDocData data, Map<String, Comparison> comparisons) {
+
+        List<AnalysisResult.Check> checks = new ArrayList<>();
+        List<String> concordantes = new ArrayList<>();
+        List<String> divergentes = new ArrayList<>();
 
         comparisons.forEach((label, comparison) -> {
-            if (comparison == Comparison.MISMATCH) {
-                checks.add(check("Cohérence 2D-DOC : " + label, "FAILED",
-                    "La valeur lue sur le document ne figure pas dans les données"
-                        + " du cachet 2D-DOC — le texte du PDF a probablement été modifié"));
-            }
+            if (comparison == Comparison.MISMATCH) divergentes.add(label);
+            else if (comparison == Comparison.MATCH) concordantes.add(label);
         });
+
+        for (String label : divergentes) {
+            checks.add(check("Cohérence 2D-DOC : " + label, "FAILED",
+                "La valeur lue sur le document ne figure pas dans les données"
+                    + " du cachet 2D-DOC — le texte du PDF a probablement été modifié"));
+        }
+
+        if (!concordantes.isEmpty()) {
+            boolean authentifie = data.isSignatureTrusted();
+            // Une concordance partielle ne rassure pas : un ecart ailleurs
+            // suffit a rendre le document suspect.
+            checks.add(check("Cohérence document / 2D-DOC",
+                divergentes.isEmpty() ? "OK" : "WARNING",
+                String.format("%d donnée%s du document confrontée%s au cachet : %s — %s",
+                    concordantes.size(),
+                    concordantes.size() > 1 ? "s" : "",
+                    concordantes.size() > 1 ? "s" : "",
+                    String.join(", ", concordantes),
+                    authentifie
+                        ? "le texte affiché correspond aux données authentifiées"
+                        : "concordantes, mais le cachet n'est pas authentifié")));
+        }
         return checks;
     }
 
