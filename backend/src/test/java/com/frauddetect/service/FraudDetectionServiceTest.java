@@ -179,6 +179,47 @@ class FraudDetectionServiceTest {
         return (int) invoke("computeScore", List.class, checks);
     }
 
+    // ── Historique ────────────────────────────────────────────────────────────
+
+    @Test
+    void historique_neRestituePasLUtilisateurRattache() throws Exception {
+        // L'entite Analysis porte une relation vers User. Serialisee telle
+        // quelle, elle echoue hors transaction — le cas en production — et
+        // exposerait l'empreinte du mot de passe la ou elle aboutit.
+        com.frauddetect.entity.User user = com.frauddetect.entity.User.builder()
+            .id(7L).email("gestionnaire@agence.fr")
+            .password("$2a$10$empreinteBCryptQuiNeDoitPasSortir")
+            .build();
+
+        com.frauddetect.entity.Analysis analyse = com.frauddetect.entity.Analysis.builder()
+            .id(1L).user(user).filename("bulletin.pdf")
+            .score(88).verdict("AUTHENTIQUE").color("green")
+            .createdAt(java.time.LocalDateTime.of(2026, 9, 17, 14, 30))
+            .build();
+
+        org.mockito.Mockito.when(analysisRepository.findByUserOrderByCreatedAtDesc(user))
+            .thenReturn(List.of(analyse));
+
+        List<com.frauddetect.dto.HistoryDto.Item> items = service.getHistory(user);
+
+        assertThat(items).hasSize(1);
+        assertThat(items.get(0).filename()).isEqualTo("bulletin.pdf");
+        assertThat(items.get(0).score()).isEqualTo(88);
+        assertThat(items.get(0).verdict()).isEqualTo("AUTHENTIQUE");
+
+        // Dates en ISO-8601 : c'est la configuration de Spring Boot, donc ce que
+        // le client recoit reellement, et ce que new Date() sait relire.
+        String json = new com.fasterxml.jackson.databind.ObjectMapper()
+            .registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule())
+            .disable(com.fasterxml.jackson.databind.SerializationFeature
+                .WRITE_DATES_AS_TIMESTAMPS)
+            .writeValueAsString(items);
+
+        assertThat(json).doesNotContain("password").doesNotContain("empreinte");
+        assertThat(json).doesNotContain("user").doesNotContain("agence.fr");
+        assertThat(json).contains("bulletin.pdf").contains("2026-09-17");
+    }
+
     private String invokeComputeVerdict(int score) {
         return (String) invoke("computeVerdict", int.class, score);
     }

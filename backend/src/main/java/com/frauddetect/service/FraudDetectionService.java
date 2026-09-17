@@ -1,5 +1,6 @@
 package com.frauddetect.service;
 
+import com.frauddetect.dto.HistoryDto;
 import com.frauddetect.entity.Analysis;
 import com.frauddetect.entity.User;
 import com.frauddetect.model.AnalysisResult;
@@ -192,8 +193,17 @@ public class FraudDetectionService {
         }
     }
 
-    public List<Analysis> getHistory(User user) {
-        return analysisRepository.findByUserOrderByCreatedAtDesc(user);
+    /**
+     * Historique des analyses, du plus recent au plus ancien.
+     *
+     * La projection en DTO fait partie du contrat : renvoyer les entites
+     * exposerait l'utilisateur rattache a chaque ligne, et leur serialisation
+     * echoue de toute facon hors transaction.
+     */
+    public List<HistoryDto.Item> getHistory(User user) {
+        return analysisRepository.findByUserOrderByCreatedAtDesc(user).stream()
+            .map(HistoryDto.Item::from)
+            .toList();
     }
 
     private int computeScore(List<AnalysisResult.Check> checks) {

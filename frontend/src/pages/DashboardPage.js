@@ -4,12 +4,19 @@ import './DashboardPage.css';
 
 export default function DashboardPage({ user, onUpgrade, onAnalyze }) {
   const [history, setHistory] = useState([]);
+  const [historyError, setHistoryError] = useState('');
   const [loading, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState(user);
 
   useEffect(() => {
     Promise.all([
-      api.get('/api/history').then(r => setHistory(r.data)).catch(() => {}),
+      // Un echec silencieux affichait "Aucune analyse" : l'utilisateur croyait
+      // son historique vide alors que le chargement avait echoue.
+      api.get('/api/history')
+        .then(r => setHistory(r.data))
+        .catch(() => setHistoryError(
+          "Impossible de charger l'historique. Rechargez la page ; si le problème"
+          + " persiste, vos analyses ne sont pas perdues.")),
       refreshMe().then(u => setCurrentUser(u)).catch(() => {})
     ]).finally(() => setLoading(false));
   }, []);
@@ -104,6 +111,8 @@ export default function DashboardPage({ user, onUpgrade, onAnalyze }) {
         <h2>Historique des analyses</h2>
         {loading ? (
           <div className="loading">Chargement...</div>
+        ) : historyError ? (
+          <div className="history-error">⚠ {historyError}</div>
         ) : history.length === 0 ? (
           <div className="empty-history">
             <span>📭</span>

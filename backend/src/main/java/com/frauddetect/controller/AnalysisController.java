@@ -1,6 +1,6 @@
 package com.frauddetect.controller;
 
-import com.frauddetect.entity.Analysis;
+import com.frauddetect.dto.HistoryDto;
 import com.frauddetect.entity.User;
 import com.frauddetect.model.AnalysisResult;
 import com.frauddetect.model.BatchAnalysisResult;
@@ -219,7 +219,7 @@ public class AnalysisController {
     }
 
     @GetMapping("/history")
-    public ResponseEntity<List<Analysis>> history(@AuthenticationPrincipal User user) {
+    public ResponseEntity<List<HistoryDto.Item>> history(@AuthenticationPrincipal User user) {
         return ResponseEntity.ok(fraudDetectionService.getHistory(user));
     }
 

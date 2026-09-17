@@ -44,6 +44,11 @@ public class SecurityConfig {
                     "/api/health",
                     "/api/contact",
                     "/api/stripe/webhook",
+                    // Sans cela, la reexpedition interne vers /error repasse par
+                    // la chaine de securite et se solde par un 403 : toute erreur
+                    // serveur se presentait au client comme un refus d'acces, ce
+                    // qui egare le diagnostic.
+                    "/error",
                     "/h2-console/**"
                 ).permitAll()
                 .anyRequest().authenticated()

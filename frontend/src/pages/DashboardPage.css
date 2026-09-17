@@ -131,6 +131,16 @@
 .empty-history span { font-size: 36px; }
 .empty-history p { color: var(--text-muted); font-size: 14px; }
 
+.history-error {
+  padding: 16px 18px;
+  border-radius: 12px;
+  background: rgba(255, 51, 102, 0.08);
+  border: 1px solid var(--red);
+  color: var(--red);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
 .history-list { display: flex; flex-direction: column; gap: 8px; }
 
 .history-item {
