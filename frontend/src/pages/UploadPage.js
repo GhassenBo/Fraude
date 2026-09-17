@@ -11,6 +11,11 @@ export default function UploadPage({ onResult, onBatchResult, user, bulletinFisc
 
   // Batch mode
   const [batchFiles, setBatchFiles] = useState([]);
+  // Avis d'imposition du meme candidat, facultatif : joint au lot, il permet de
+  // rapprocher les revenus declares a l'administration sans saisie, et de
+  // verifier que l'avis concerne bien le salarie des bulletins.
+  const [avisFile, setAvisFile] = useState(null);
+  const avisInputRef = useRef();
 
   const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -46,6 +51,13 @@ export default function UploadPage({ onResult, onBatchResult, user, bulletinFisc
 
   const removeBatchFile = (idx) => setBatchFiles(prev => prev.filter((_, i) => i !== idx));
 
+  const pickAvis = (f) => {
+    if (!f) return;
+    const err = validateFile(f);
+    if (err) { setError(err); return; }
+    setError(''); setAvisFile(f);
+  };
+
   const handleDrop = (e) => {
     e.preventDefault(); setDragging(false);
     const files = Array.from(e.dataTransfer.files);
@@ -54,6 +66,29 @@ export default function UploadPage({ onResult, onBatchResult, user, bulletinFisc
     } else {
       handleBatchFiles(files);
     }
+  };
+
+  const multipart = { headers: { 'Content-Type': 'multipart/form-data' } };
+
+  const postLot = async (files) => {
+    const form = new FormData();
+    files.forEach(f => form.append('files', f));
+    const res = await api.post('/api/analyze/batch', form, multipart);
+    return res.data;
+  };
+
+  /**
+   * Le dossier renvoie l'analyse du lot et, a part, ce qui releve de l'avis. On
+   * les recompose en un seul objet pour que la page de resultats garde le meme
+   * contrat que pour un lot sans avis.
+   */
+  const postDossier = async (files, avis) => {
+    const form = new FormData();
+    files.forEach(f => form.append('bulletins', f));
+    form.append('avisImposition', avis);
+    const res = await api.post('/api/analyze/dossier', form, multipart);
+    const { bulletins, ...dossier } = res.data;
+    return { ...bulletins, dossier: { ...dossier, fichier: avis.name } };
   };
 
   const handleAnalyze = async () => {
@@ -76,13 +111,13 @@ export default function UploadPage({ onResult, onBatchResult, user, bulletinFisc
     } else {
       if (batchFiles.length === 0) return;
       setLoading(true); setError(''); setProgress(0);
-      const formData = new FormData();
-      batchFiles.forEach(f => formData.append('files', f));
       const interval = setInterval(() => setProgress(p => Math.min(p + 5, 85)), 300);
       try {
-        const res = await api.post('/api/analyze/batch', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+        const res = avisFile
+          ? await postDossier(batchFiles, avisFile)
+          : await postLot(batchFiles);
         clearInterval(interval); setProgress(100);
-        setTimeout(() => onBatchResult(res.data), 400);
+        setTimeout(() => onBatchResult(res), 400);
       } catch (err) {
         clearInterval(interval); setProgress(0);
         if (err.response?.data?.quotaExceeded) setError('quota');
@@ -122,7 +157,7 @@ export default function UploadPage({ onResult, onBatchResult, user, bulletinFisc
       <div className="mode-toggle">
         <button
           className={`mode-btn ${mode === 'single' ? 'active' : ''}`}
-          onClick={() => { setMode('single'); setError(''); setBatchFiles([]); }}
+          onClick={() => { setMode('single'); setError(''); setBatchFiles([]); setAvisFile(null); }}
         >
           Document unique
         </button>
@@ -216,6 +251,27 @@ export default function UploadPage({ onResult, onBatchResult, user, bulletinFisc
                 ))}
               </div>
             )}
+
+            <div className="batch-avis">
+              <input ref={avisInputRef} type="file" accept=".pdf" hidden
+                     onChange={(e) => pickAvis(e.target.files?.[0])} />
+              {!avisFile ? (
+                <button className="batch-avis-btn" onClick={() => avisInputRef.current?.click()}>
+                  + Joindre l&rsquo;avis d&rsquo;imposition <span className="batch-avis-opt">(optionnel)</span>
+                </button>
+              ) : (
+                <div className="batch-file-item">
+                  <span className="batch-file-num">📑</span>
+                  <span className="batch-file-name">{avisFile.name}</span>
+                  <span className="batch-file-size">{(avisFile.size / 1024).toFixed(0)} Ko</span>
+                  <button className="file-remove" onClick={() => setAvisFile(null)}>✕</button>
+                </div>
+              )}
+              <p className="batch-avis-hint">
+                L&rsquo;avis permet de rapprocher les revenus déclarés à l&rsquo;administration
+                des bulletins, sans saisie, et de vérifier qu&rsquo;il concerne bien le salarié.
+              </p>
+            </div>
           </div>
         )}
 
@@ -250,9 +306,11 @@ export default function UploadPage({ onResult, onBatchResult, user, bulletinFisc
         {!loading && (mode === 'single' ? file : batchFiles.length > 0) && error !== 'quota' && (
           <button className="analyze-btn" onClick={handleAnalyze}>
             <span className="analyze-icon">⬡</span>
-            {mode === 'batch'
-              ? `Analyser ${batchFiles.length} document${batchFiles.length > 1 ? 's' : ''}`
-              : 'Lancer l\'analyse'}
+            {mode !== 'batch'
+              ? 'Lancer l\'analyse'
+              : avisFile
+                ? `Analyser le dossier (${batchFiles.length} bulletin${batchFiles.length > 1 ? 's' : ''} + avis)`
+                : `Analyser ${batchFiles.length} document${batchFiles.length > 1 ? 's' : ''}`}
           </button>
         )}
       </div>

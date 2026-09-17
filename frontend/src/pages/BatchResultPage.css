@@ -303,3 +303,11 @@
 .cross-body { display: flex; flex-direction: column; gap: 3px; }
 .cross-body strong { font-size: 13px; color: var(--text); }
 .cross-body span { font-size: 13px; color: var(--text-muted); line-height: 1.5; }
+
+.batch-dossier-base {
+  margin: 0 0 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}

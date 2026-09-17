@@ -208,7 +208,9 @@ public class FraudDetectionService {
         return Math.max(0, Math.min(100, total));
     }
 
-    private String computeVerdict(int score) {
+    // Visibles dans le paquet : DossierVerificationService recalcule le verdict
+    // d'un lot apres ses propres controles, et doit appliquer les memes seuils.
+    String computeVerdict(int score) {
         if (score >= 75) return "AUTHENTIQUE";
         if (score >= 45) return "SUSPECT";
         return "FRAUDULEUX";
@@ -228,7 +230,7 @@ public class FraudDetectionService {
         return base;
     }
 
-    private String computeColor(int score) {
+    String computeColor(int score) {
         if (score >= 75) return "green";
         if (score >= 45) return "orange";
         return "red";

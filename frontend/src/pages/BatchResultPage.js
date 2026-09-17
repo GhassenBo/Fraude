@@ -68,6 +68,8 @@ export default function BatchResultPage({ batchResult, onReset, onUpgrade }) {
         </>
       )}
 
+      {batchResult.dossier && <DossierSection dossier={batchResult.dossier} />}
+
       {/* Document cards */}
       <h2 className="batch-section-title">Résultats par document</h2>
       <div className="batch-docs">
@@ -120,6 +122,49 @@ export default function BatchResultPage({ batchResult, onReset, onUpgrade }) {
         })}
       </div>
     </main>
+  );
+}
+
+/**
+ * Controles issus de l'avis d'imposition joint au dossier : rapprochement des
+ * revenus, cachet 2D-DOC, et concordance d'identite. La base du rapprochement
+ * est affichee : le gestionnaire doit pouvoir voir de quel bulletin sort le
+ * montant compare, et non seulement son verdict.
+ */
+function DossierSection({ dossier }) {
+  const checks = [...(dossier.dossierChecks || []), ...(dossier.avisChecks || [])];
+  if (checks.length === 0) return null;
+
+  const base = dossier.baseRapprochement;
+
+  return (
+    <>
+      <h2 className="batch-section-title">
+        Avis d&rsquo;imposition{dossier.fichier ? ` · ${dossier.fichier}` : ''}
+      </h2>
+
+      {base && (
+        <p className="batch-dossier-base">
+          Base du rapprochement : {base.netImposableMensuel.toLocaleString('fr-FR', {
+            minimumFractionDigits: 2, maximumFractionDigits: 2,
+          })} € par mois, {base.origine}.
+        </p>
+      )}
+
+      <div className="batch-cross">
+        {checks.map((check, i) => (
+          <div key={i} className={`cross-check cross-${(check.status || '').toLowerCase()}`}>
+            <span className="cross-icon">
+              {check.status === 'OK' ? '✓' : check.status === 'WARNING' ? '!' : '✕'}
+            </span>
+            <div className="cross-body">
+              <strong>{check.label}</strong>
+              <span>{check.detail}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
   );
 }
 

@@ -281,6 +281,58 @@ export function exportBatchPdf(batchResult) {
   doc.line(M, y, W - M, y);
   y += 8;
 
+  // Recoupements du dossier : ils ne figurent sur aucune fiche de document,
+  // puisqu'ils naissent de la confrontation des pieces entre elles.
+  const recoupements = [
+    ...(batchResult.crossChecks || []),
+    ...(batchResult.dossier?.dossierChecks || []),
+    ...(batchResult.dossier?.avisChecks || []),
+  ];
+  if (recoupements.length > 0) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(...C.accent);
+    doc.text('RECOUPEMENTS DU DOSSIER', M, y);
+    y += 7;
+
+    const base = batchResult.dossier?.baseRapprochement;
+    if (base) {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor(...C.muted);
+      const intro = doc.splitTextToSize(s(
+        `Base du rapprochement : ${base.netImposableMensuel.toFixed(2)} EUR par mois,`
+        + ` ${base.origine}.`), W - 2 * M);
+      doc.text(intro, M, y);
+      y += intro.length * 3.8 + 3;
+    }
+
+    for (const check of recoupements) {
+      if (y > 262) y = newPage(doc);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(...statusColor(check.status));
+      doc.text(statusIcon(check.status), M + 2, y);
+      doc.setTextColor(...C.text);
+      doc.text(s(check.label || ''), M + 8, y);
+      if (check.detail) {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7.5);
+        doc.setTextColor(...C.muted);
+        const lines = doc.splitTextToSize(s(check.detail), W - M - 8 - M);
+        doc.text(lines, M + 8, y + 4.5);
+        y += 4.5 + lines.length * 3.8 + 3;
+      } else {
+        y += 7;
+      }
+    }
+
+    y += 3;
+    doc.setDrawColor(...C.border);
+    doc.line(M, y, W - M, y);
+    y += 8;
+  }
+
   // Individual results
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);

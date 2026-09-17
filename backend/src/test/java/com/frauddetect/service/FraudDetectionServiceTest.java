@@ -16,7 +16,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Tests the scoring and verdict logic in FraudDetectionService via reflection,
- * since computeScore / computeVerdict / computeColor are private methods.
+ * since computeScore and computeVerdictWithChecks are not public.
  */
 @ExtendWith(MockitoExtension.class)
 class FraudDetectionServiceTest {
