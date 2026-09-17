@@ -48,6 +48,7 @@ services:
       MAIL_PASSWORD: ${MAIL_PASSWORD:-}
       MAIL_FROM: ${MAIL_FROM:-noreply@frauddetect.fr}
       MAIL_FROM_NAME: ${MAIL_FROM_NAME:-FraudDetect}
+      CONTACT_TO: ${CONTACT_TO:-}
       AVIS_VERIFICATION_URL: ${AVIS_VERIFICATION_URL:-}
       TWO_DDOC_MODE: ${TWO_DDOC_MODE:-DISABLED}
     networks:

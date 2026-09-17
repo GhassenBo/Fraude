@@ -25,6 +25,10 @@ public class EmailService {
     @Value("${spring.mail.host:}")
     private String mailHost;
 
+    /** Destinataire des messages du formulaire de contact. */
+    @Value("${app.contact.to:}")
+    private String contactTo;
+
     public EmailService(JavaMailSender mailSender) {
         this.mailSender = mailSender;
     }
@@ -53,6 +57,61 @@ public class EmailService {
             // peut demander un renvoi depuis l'application.
             System.err.println("[MAIL] Envoi impossible a " + user.getEmail() + " : " + e.getMessage());
         }
+    }
+
+    /**
+     * Relaie un message du formulaire de contact.
+     *
+     * L'expediteur reste l'adresse du service : mettre celle du visiteur ferait
+     * echouer SPF et DKIM, et le message serait classe en indesirable. Elle est
+     * placee en Reply-To, de sorte qu'une reponse lui parvienne directement.
+     *
+     * Tout ce qui entre dans un en-tete est purge des retours a la ligne : un
+     * nom contenant "\nBcc:" ajouterait sinon des destinataires au message.
+     *
+     * @return false si l'envoi a echoue. L'appelant doit le dire au visiteur :
+     *         lui afficher une confirmation alors que rien n'est parti lui ferait
+     *         attendre une reponse qui ne viendra pas.
+     */
+    public boolean sendContactMessage(String nom, String emailVisiteur,
+                                      String societe, String message) {
+        if (!isEnabled()) {
+            System.out.println("[MAIL] Desactive — message de contact non relaye");
+            return false;
+        }
+
+        String destinataire = (contactTo == null || contactTo.isBlank()) ? from : contactTo;
+
+        try {
+            MimeMessage mime = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(mime, "UTF-8");
+            helper.setFrom(from, fromName);
+            helper.setTo(destinataire);
+            helper.setSubject("[Contact] " + enTete(nom));
+            helper.setReplyTo(enTete(emailVisiteur));
+            helper.setText(contactTexte(nom, emailVisiteur, societe, message));
+            mailSender.send(mime);
+            return true;
+        } catch (Exception e) {
+            System.err.println("[MAIL] Message de contact non relaye : " + e.getMessage());
+            return false;
+        }
+    }
+
+    /** Valeur utilisable dans un en-tete : sans saut de ligne, longueur bornee. */
+    String enTete(String valeur) {
+        if (valeur == null) return "";
+        String propre = valeur.replaceAll("[\\r\\n]+", " ").trim();
+        return propre.length() > 120 ? propre.substring(0, 120) : propre;
+    }
+
+    // Texte brut : le corps reprend ce que le visiteur a ecrit, et l'interpreter
+    // comme du HTML exposerait la boite de reception a une injection.
+    private String contactTexte(String nom, String email, String societe, String message) {
+        return "Nom : " + nom + "\n"
+            + "Email : " + email + "\n"
+            + (societe != null && !societe.isBlank() ? "Société : " + societe + "\n" : "")
+            + "\n" + message + "\n";
     }
 
     private String verificationLink(String token) {

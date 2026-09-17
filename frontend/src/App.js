@@ -121,6 +121,7 @@ function SiteFooter() {
         <a href="/fraude-fiche-de-paie/">Fraude à la fiche de paie</a>
         <a href="/verifier-fiche-de-paie-locataire/">Vérifier un dossier locataire</a>
         <a href="/faux-bulletin-de-salaire/">Reconnaître un faux bulletin</a>
+        <a href="/contact/">Contact</a>
       </nav>
     </footer>
   );

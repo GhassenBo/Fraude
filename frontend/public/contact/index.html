@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+<title>Contact | FraudDetect</title>
+<meta name="description" content="Une question sur la vérification des dossiers de candidats locataires, une démonstration ou un devis pour plusieurs agences : écrivez-nous, réponse sous 24 heures ouvrées." />
+<link rel="canonical" href="https://frauddetect.fr/contact/" />
+
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://frauddetect.fr/contact/" />
+<meta property="og:title" content="Contacter FraudDetect" />
+<meta property="og:description" content="Une question, une démonstration, un devis pour plusieurs agences : réponse sous 24 heures ouvrées." />
+<meta property="og:site_name" content="FraudDetect" />
+<meta property="og:locale" content="fr_FR" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/content.css" />
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "ContactPage",
+  "name": "Contacter FraudDetect",
+  "description": "Formulaire de contact du service de vérification des dossiers de candidats locataires.",
+  "inLanguage": "fr-FR",
+  "mainEntityOfPage": "https://frauddetect.fr/contact/",
+  "publisher": { "@type": "Organization", "name": "FraudDetect" }
+}
+</script>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header-inner">
+    <a class="logo" href="/">
+      <span class="logo-icon">⬡</span>
+      <span class="logo-text">FRAUD<span class="logo-accent">DETECT</span></span>
+    </a>
+    <a class="header-cta" href="/">Analyser un bulletin</a>
+  </div>
+</header>
+
+<main>
+  <h1>Nous contacter</h1>
+  <p class="lead">
+    Une question sur les contrôles appliqués, une démonstration pour votre agence,
+    un devis pour plusieurs utilisateurs : écrivez-nous. Nous répondons sous
+    24 heures ouvrées.
+  </p>
+
+  <p>
+    Si votre question porte sur un dossier en cours d'analyse, précisez ce que le
+    rapport indique et ce qui vous semble discutable : c'est ainsi que les contrôles
+    s'améliorent. Ne joignez pas de bulletin ni d'avis d'imposition à votre message —
+    ces documents contiennent des données personnelles, et le formulaire n'est pas
+    le bon canal pour les transmettre.
+  </p>
+
+  <form class="form-contact" id="form-contact" novalidate>
+    <label class="champ">
+      <span>Nom et prénom</span>
+      <input type="text" name="nom" maxlength="80" required autocomplete="name" />
+    </label>
+
+    <label class="champ">
+      <span>Adresse email</span>
+      <input type="email" name="email" maxlength="120" required autocomplete="email" />
+    </label>
+
+    <label class="champ">
+      <span>Société <em>(facultatif)</em></span>
+      <input type="text" name="societe" maxlength="120" autocomplete="organization" />
+    </label>
+
+    <label class="champ">
+      <span>Votre message</span>
+      <textarea name="message" maxlength="3000" required></textarea>
+    </label>
+
+    <!-- Leurre : invisible et hors du parcours clavier. Un robot qui remplit
+         tous les champs se signale ; un humain ne le voit jamais. -->
+    <label class="leurre" aria-hidden="true">
+      Site web
+      <input type="text" name="siteWeb" tabindex="-1" autocomplete="off" />
+    </label>
+
+    <button type="submit">Envoyer le message</button>
+
+    <div class="form-retour" id="form-retour" role="status" hidden></div>
+  </form>
+</main>
+
+<footer class="site-footer">
+  <div class="site-footer-inner">
+    <nav>
+      <a href="/">Analyser un bulletin</a>
+      <a href="/fraude-fiche-de-paie/">Fraude à la fiche de paie</a>
+      <a href="/verifier-fiche-de-paie-locataire/">Vérifier un dossier locataire</a>
+      <a href="/faux-bulletin-de-salaire/">Reconnaître un faux bulletin</a>
+    </nav>
+    <p>FraudDetect — analyse de dossiers de candidats locataires.</p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var form = document.getElementById('form-contact');
+  var retour = document.getElementById('form-retour');
+  var bouton = form.querySelector('button[type="submit"]');
+
+  function affiche(texte, ok) {
+    retour.textContent = texte;
+    retour.className = 'form-retour ' + (ok ? 'ok' : 'ko');
+    retour.hidden = false;
+  }
+
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+
+    var data = {};
+    new FormData(form).forEach(function (valeur, cle) { data[cle] = valeur; });
+
+    // Verification cote navigateur pour eviter un aller-retour inutile ; le
+    // serveur revalide de toute facon, c'est lui qui fait foi.
+    if (!data.nom || !data.email || !data.message) {
+      affiche('Renseignez votre nom, votre adresse email et votre message.', false);
+      return;
+    }
+    if (data.message.trim().length < 10) {
+      affiche('Votre message est trop court pour être traité.', false);
+      return;
+    }
+
+    bouton.disabled = true;
+    bouton.textContent = 'Envoi…';
+    retour.hidden = true;
+
+    fetch('/api/contact', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    })
+      .then(function (r) {
+        return r.json().catch(function () { return {}; }).then(function (corps) {
+          return { ok: r.ok, corps: corps };
+        });
+      })
+      .then(function (res) {
+        if (res.ok) {
+          form.reset();
+          affiche(res.corps.message || 'Message envoyé.', true);
+        } else {
+          affiche(res.corps.error || 'L\'envoi a échoué. Réessayez plus tard.', false);
+        }
+      })
+      .catch(function () {
+        affiche('Connexion impossible. Vérifiez votre réseau et réessayez.', false);
+      })
+      .then(function () {
+        bouton.disabled = false;
+        bouton.textContent = 'Envoyer le message';
+      });
+  });
+})();
+</script>
+
+</body>
+</html>

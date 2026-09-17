@@ -42,6 +42,7 @@ public class SecurityConfig {
                     "/api/auth/login",
                     "/api/auth/verify",
                     "/api/health",
+                    "/api/contact",
                     "/api/stripe/webhook",
                     "/h2-console/**"
                 ).permitAll()
