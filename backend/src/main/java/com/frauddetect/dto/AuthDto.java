@@ -1,5 +1,6 @@
 package com.frauddetect.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 import jakarta.validation.constraints.*;
 
@@ -40,6 +41,10 @@ public class AuthDto {
         private String plan;
         private int documentsUsed;
         private int remainingDocuments;
+
+        // Lombok nomme l'accesseur isPro(), que Jackson sérialise en "pro" :
+        // le nom est figé ici, le frontend lisant isPro.
+        @JsonProperty("isPro")
         private boolean isPro;
         private boolean emailVerified;
 

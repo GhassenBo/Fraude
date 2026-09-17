@@ -175,7 +175,7 @@ function Header({ user, onLogout, onNav, currentPage }) {
           {user ? (
             <div className="header-user">
               <span className={`plan-badge ${user.isPro ? 'pro' : 'free'}`}>{user.isPro ? 'PRO' : 'FREE'}</span>
-              {!user.isPro && <span className="docs-left">{user.remainingDocuments} doc{user.remainingDocuments !== 1 ? 's' : ''} restant{user.remainingDocuments !== 1 ? 's' : ''}</span>}
+              {!user.isPro && user.remainingDocuments >= 0 && <span className="docs-left">{user.remainingDocuments} doc{user.remainingDocuments !== 1 ? 's' : ''} restant{user.remainingDocuments !== 1 ? 's' : ''}</span>}
               <span className="user-email">{user.email}</span>
               <button className="logout-btn" onClick={onLogout}>Déconnexion</button>
             </div>
