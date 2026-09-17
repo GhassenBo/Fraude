@@ -3,9 +3,8 @@ package com.frauddetect.controller;
 import com.frauddetect.entity.Analysis;
 import com.frauddetect.entity.User;
 import com.frauddetect.model.AnalysisResult;
-import com.frauddetect.model.AvisImposition;
 import com.frauddetect.model.BatchAnalysisResult;
-import com.frauddetect.service.AvisImpositionService;
+import com.frauddetect.service.TaxDocumentVerificationService;
 import com.frauddetect.service.FraudDetectionService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -20,12 +19,12 @@ import java.util.Map;
 public class AnalysisController {
 
     private final FraudDetectionService fraudDetectionService;
-    private final AvisImpositionService avisImpositionService;
+    private final TaxDocumentVerificationService taxDocumentVerificationService;
 
     public AnalysisController(FraudDetectionService fraudDetectionService,
-                              AvisImpositionService avisImpositionService) {
+                              TaxDocumentVerificationService taxDocumentVerificationService) {
         this.fraudDetectionService = fraudDetectionService;
-        this.avisImpositionService = avisImpositionService;
+        this.taxDocumentVerificationService = taxDocumentVerificationService;
     }
 
     @PostMapping("/analyze")
@@ -122,19 +121,37 @@ public class AnalysisController {
                 "emailNotVerified", true));
 
         try {
-            AvisImposition avis = avisImpositionService.extractFromPdf(file.getInputStream());
+            TaxDocumentVerificationService.Result result =
+                taxDocumentVerificationService.verify(file.getBytes(), netImposableMensuel);
 
             Map<String, Object> body = new java.util.HashMap<>();
-            body.put("avis", avis);
-            body.put("checks", avisImpositionService.verify(avis, netImposableMensuel));
-            String link = avisImpositionService.verificationLink();
-            if (link != null) body.put("verificationUrl", link);
+            body.put("avis", result.avis());
+            body.put("checks", result.checks());
+            body.put("twoDDoc", twoDDocSummary(result));
 
             return ResponseEntity.ok(body);
         } catch (Exception e) {
             return ResponseEntity.internalServerError()
                 .body(Map.of("error", "Erreur lors de l'analyse de l'avis : " + e.getMessage()));
         }
+    }
+
+    /**
+     * Restitution du 2D-DOC sans donnee nominative : ni contenu brut, ni valeurs
+     * de champs, qui portent identite et montants.
+     */
+    private Map<String, Object> twoDDocSummary(TaxDocumentVerificationService.Result result) {
+        var data = result.twoDDoc();
+        Map<String, Object> summary = new java.util.HashMap<>();
+        summary.put("detected", data.isDetected());
+        summary.put("signatureStatus", data.getSignatureStatus());
+        if (data.isDetected()) {
+            summary.put("issuer", data.getAuthorityId());
+            summary.put("documentType", data.getDocumentType());
+            summary.put("signatureDate", data.getSignatureDate());
+            summary.put("comparisons", result.comparisons());
+        }
+        return summary;
     }
 
     @GetMapping("/history")
