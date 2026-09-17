@@ -214,4 +214,70 @@ class AntsTslCertificateProviderTest {
         assertThatThrownBy(() -> providerWith(client).find("FR06", "FPE6"))
             .isInstanceOf(TwoDDocCertificateProvider.CertificateSourceUnavailableException.class);
     }
+
+    // ── Annuaire en conteneur MIME ────────────────────────────────────────────
+
+    /**
+     * Reproduit la forme publiee par FR06 : parties application/pkix-cert
+     * separees par une frontiere, chacune portant un certificat en DER.
+     */
+    private byte[] mimeDirectory(byte[]... certificates) throws IOException {
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        for (byte[] der : certificates) {
+            out.write("\r\n--End\r\n".getBytes(StandardCharsets.US_ASCII));
+            out.write("Content-type: application/pkix-cert\r\n\r\n"
+                .getBytes(StandardCharsets.US_ASCII));
+            out.write(der);
+        }
+        out.write("\r\n--End--\r\n".getBytes(StandardCharsets.US_ASCII));
+        return out.toByteArray();
+    }
+
+    @Test
+    void certificatTrouveDansUnAnnuaireMime() throws Exception {
+        StubHttpClient client = new StubHttpClient();
+        client.serve(TSL_URL, tslContent.getBytes(StandardCharsets.UTF_8));
+        client.serve(DIRECTORY_URL, mimeDirectory(signingCertificateDer));
+
+        Optional<X509Certificate> found = providerWith(client).find("FR06", "FPE6");
+
+        assertThat(found).isPresent();
+        assertThat(found.get().getSubjectX500Principal().getName()).contains("FPE6");
+    }
+
+    @Test
+    void annuaireMimeAPlusieursCertificats_leBonEstRetenu() throws Exception {
+        byte[] autreCertificat = new DefaultResourceLoader()
+            .getResource("classpath:2ddoc/certificates/FR06_CA.cer")
+            .getInputStream().readAllBytes();
+
+        StubHttpClient client = new StubHttpClient();
+        client.serve(TSL_URL, tslContent.getBytes(StandardCharsets.UTF_8));
+        // L'autorite racine precede le certificat de signature : c'est bien le
+        // second qui doit etre retenu, et non le premier rencontre.
+        client.serve(DIRECTORY_URL, mimeDirectory(autreCertificat, signingCertificateDer));
+
+        Optional<X509Certificate> found = providerWith(client).find("FR06", "FPE6");
+
+        assertThat(found).isPresent();
+        assertThat(found.get().getSubjectX500Principal().getName()).contains("FPE6");
+    }
+
+    @Test
+    void annuaireMimeSansLIdentifiant_donneIntrouvable() throws Exception {
+        StubHttpClient client = new StubHttpClient();
+        client.serve(TSL_URL, tslContent.getBytes(StandardCharsets.UTF_8));
+        client.serve(DIRECTORY_URL, mimeDirectory(signingCertificateDer));
+
+        assertThat(providerWith(client).find("FR06", "ZZZZ")).isEmpty();
+    }
+
+    @Test
+    void annuaireIllisible_donneIntrouvable() throws Exception {
+        StubHttpClient client = new StubHttpClient();
+        client.serve(TSL_URL, tslContent.getBytes(StandardCharsets.UTF_8));
+        client.serve(DIRECTORY_URL, "aucun certificat ici".getBytes(StandardCharsets.UTF_8));
+
+        assertThat(providerWith(client).find("FR06", "FPE6")).isEmpty();
+    }
 }

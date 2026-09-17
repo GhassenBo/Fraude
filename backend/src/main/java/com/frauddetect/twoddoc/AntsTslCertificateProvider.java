@@ -15,6 +15,7 @@ import java.net.http.HttpResponse;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
@@ -168,16 +169,19 @@ public class AntsTslCertificateProvider implements TwoDDocCertificateProvider {
     }
 
     /**
-     * L'annuaire d'une autorite peut etre un document XML listant les
-     * certificats, ou un certificat unique. Les deux formes sont acceptees, sans
-     * construire d'URL par convention.
+     * Cherche le certificat portant l'identifiant dans l'annuaire de l'autorite.
+     *
+     * Trois formes rencontrees, toutes acceptees sans construire d'URL par
+     * convention : un document XML listant des certificats en base64, un
+     * conteneur MIME multipart de parties application/pkix-cert, ou un
+     * certificat isole. FR06 publie la deuxieme forme.
      */
     private Optional<X509Certificate> findInDirectory(String supplyPoint, String certificateId)
         throws CertificateSourceUnavailableException {
 
         byte[] body = fetch(supplyPoint);
 
-        // Cas d'un annuaire XML : on cherche l'entree portant l'identifiant.
+        // Annuaire XML : entrees en base64.
         try {
             Document directory = parseXml(body);
             NodeList certificates = directory.getElementsByTagNameNS("*", TAG_CERTIFICATE);
@@ -189,17 +193,60 @@ public class AntsTslCertificateProvider implements TwoDDocCertificateProvider {
                 }
             }
         } catch (Exception notXml) {
-            // Non XML : tente une lecture directe en X.509 ci-dessous.
+            // Ni XML ni exploitable comme tel : on tente les formes binaires.
         }
 
-        try (ByteArrayInputStream in = new ByteArrayInputStream(body)) {
-            CertificateFactory factory = CertificateFactory.getInstance("X.509");
-            X509Certificate candidate = (X509Certificate) factory.generateCertificate(in);
-            return matchesIdentifier(candidate, certificateId)
-                ? Optional.of(candidate) : Optional.empty();
-        } catch (Exception e) {
-            return Optional.empty();
+        for (X509Certificate candidate : parseDerSequence(body)) {
+            if (matchesIdentifier(candidate, certificateId)) {
+                return Optional.of(candidate);
+            }
         }
+        return Optional.empty();
+    }
+
+    /**
+     * Extrait tous les certificats d'un flux binaire, qu'ils soient isoles ou
+     * separes par des en-tetes MIME.
+     *
+     * La fabrique X.509 est d'abord sollicitee telle quelle : elle lit un
+     * certificat isole, un flux PEM et un conteneur PKCS#7. Si elle ne reconnait
+     * rien, chaque debut de structure DER est repere dans les octets, une
+     * SEQUENCE dont la longueur tient sur deux octets, soit 0x30 0x82 ; la
+     * fabrique lit alors cette longueur et s'arrete a la fin du certificat.
+     * L'extraction devient ainsi independante du format d'enveloppe, ce que
+     * requiert le conteneur MIME multipart publie par FR06.
+     */
+    private List<X509Certificate> parseDerSequence(byte[] body) {
+        List<X509Certificate> found = new ArrayList<>();
+        CertificateFactory factory;
+        try {
+            factory = CertificateFactory.getInstance("X.509");
+        } catch (Exception e) {
+            return found;
+        }
+
+        // La fabrique lit d'elle-meme un certificat isole, un flux PEM et un
+        // conteneur PKCS#7 : on la laisse essayer avant de balayer les octets.
+        try (ByteArrayInputStream in = new ByteArrayInputStream(body)) {
+            for (java.security.cert.Certificate certificate : factory.generateCertificates(in)) {
+                if (certificate instanceof X509Certificate x509) found.add(x509);
+            }
+        } catch (Exception notDirectlyReadable) {
+            // Enveloppe non reconnue : le balayage ci-dessous prend le relais.
+        }
+        if (!found.isEmpty()) return found;
+
+        for (int i = 0; i + 1 < body.length; i++) {
+            if ((body[i] & 0xFF) != 0x30 || (body[i + 1] & 0xFF) != 0x82) continue;
+            try {
+                X509Certificate certificate = (X509Certificate) factory.generateCertificate(
+                    new ByteArrayInputStream(body, i, body.length - i));
+                if (certificate != null) found.add(certificate);
+            } catch (Exception notACertificate) {
+                // Sequence DER sans rapport : on poursuit le balayage.
+            }
+        }
+        return found;
     }
 
     /**
