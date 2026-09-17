@@ -133,4 +133,50 @@ class AvisImpositionServiceTest {
         // Sans URL confirmee, mieux vaut ne rien proposer qu'une adresse erronee.
         assertThat(service.verificationLink()).isNull();
     }
+
+    // ── Identite des declarants ──────────────────────────────────────────────
+
+    @Test
+    void extraitLesNomsDesDeclarants() {
+        String text = "Declarant 1 - Nom de naissance : MARTIN  JEAN\n"
+            + "Declarant 2 - Nom de naissance : DUPONT  MARIE\n"
+            + "Total des salaires et assimiles 2........       31560\n";
+
+        AvisImposition avis = service.extract(text);
+
+        assertThat(avis.getNomsDeclarants())
+            .containsExactly("MARTIN JEAN", "DUPONT MARIE");
+    }
+
+    @Test
+    void espacesMultiplesReduits() {
+        // Le texte extrait separe nom et prenom par plusieurs espaces.
+        AvisImposition avis = service.extract(
+            "Declarant 1 - Nom de naissance : MARTIN    JEAN\n");
+
+        assertThat(avis.getNomsDeclarants()).containsExactly("MARTIN JEAN");
+    }
+
+    @Test
+    void declarantAvecAccentEtTiret_estExtrait() {
+        AvisImposition avis = service.extract(
+            "Déclarant 1 - Nom de naissance : LE GOFF  ANNE-MARIE\n");
+
+        assertThat(avis.getNomsDeclarants()).containsExactly("LE GOFF ANNE-MARIE");
+    }
+
+    @Test
+    void sansDeclarant_listeVide() {
+        assertThat(service.extract("Total des salaires 31560").getNomsDeclarants()).isEmpty();
+    }
+
+    @Test
+    void espaceInsecableAvantLesDeuxPoints_neBloquePasLExtraction() {
+        // Typographie francaise : U+00A0 precede les deux-points sur le document
+        // reel, et \s ne le reconnait pas.
+        AvisImposition avis = service.extract(
+            "D\u00e9clarant 1 - Nom de naissance\u00a0: MARTIN  JEAN\n");
+
+        assertThat(avis.getNomsDeclarants()).containsExactly("MARTIN JEAN");
+    }
 }

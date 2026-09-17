@@ -73,18 +73,39 @@ public class TaxDocumentVerificationService {
     /**
      * Valeurs soumises au rapprochement.
      *
-     * Limite au revenu fiscal de reference, seule donnee dont la presence dans
-     * les champs signes a ete verifiee sur un avis de production. Y ajouter le
-     * nombre de parts produisait un ecart trompeur, son format dans le code
-     * n'etant pas celui du texte : signaler une anomalie sur une correspondance
-     * supposee serait pire que ne rien signaler. D'autres valeurs pourront etre
-     * ajoutees a mesure que leur format est confirme.
+     * Seules figurent ici les donnees a la fois lisibles dans le texte du PDF et
+     * dont la presence dans les champs signes a ete verifiee sur un avis de
+     * production. Une valeur comparee a tort produirait un ecart sur un document
+     * authentique, ce qui est plus nuisible que de ne pas la comparer.
+     *
+     * Ecartees, et pourquoi :
+     *
+     *   numero fiscal      present dans le 2D-DOC, mais figurant sur le document
+     *                      dans une zone graphique que l'extraction de texte ne
+     *                      restitue pas : aucune source a comparer.
+     *   reference de l'avis absente du texte extrait.
+     *   nombre de parts    valeur trop courte pour etre discriminante : "3" se
+     *                      retrouve dans presque tous les champs numeriques, ce
+     *                      qui produit autant de faux rapprochements que de faux
+     *                      ecarts.
+     *   impot, annee       peu discriminants, et l'annee est deja couverte par le
+     *                      champ portant l'identite.
      */
     private Map<String, String> comparableValues(AvisImposition avis) {
         Map<String, String> values = new LinkedHashMap<>();
+
         if (avis.getRevenuFiscalReference() != null) {
             values.put("revenu fiscal de référence",
                 String.valueOf(avis.getRevenuFiscalReference().longValue()));
+        }
+
+        // Le champ signe porte nom et prenom accoles : chaque declarant est
+        // compare separement, un avis de foyer en comptant plusieurs.
+        List<String> declarants = avis.getNomsDeclarants();
+        if (declarants != null) {
+            for (int i = 0; i < declarants.size(); i++) {
+                values.put("identité du déclarant " + (i + 1), declarants.get(i));
+            }
         }
         return values;
     }

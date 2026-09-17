@@ -55,6 +55,10 @@ public class AvisImpositionService {
     private static final Pattern MONTANT = Pattern.compile(
         "(?<![0-9.,])((?:\\d{1,3}(?:[\\s\u00a0]\\d{3})+|\\d+)(?:[.,]\\d{2})?)(?![0-9])");
 
+    // "Declarant 1 - Nom de naissance : MARTIN  JEAN"
+    private static final Pattern DECLARANT = Pattern.compile(
+        "(?i)d[e\u00e9]clarant\\s*\\d\\s*-\\s*nom de naissance\\s*:\\s*([A-Z\u00c0-\u00dc' -]{3,60})");
+
     // Couvre "revenus 2025", "revenus de 2025" et "revenus de l'annee 2025".
     private static final Pattern ANNEE_REVENUS = Pattern.compile(
         "(?i)revenus?\\s*(?:de\\s*(?:l'?ann[eé]e\\s*)?)?(20\\d{2})");
@@ -74,7 +78,11 @@ public class AvisImpositionService {
         }
     }
 
-    public AvisImposition extract(String text) {
+    public AvisImposition extract(String rawText) {
+        // La typographie francaise place une espace insecable avant les
+        // deux-points, que \\s ne reconnait pas : les libelles du document en
+        // contiennent, et toute expression les traversant echouerait.
+        String text = rawText.replace('\u00a0', ' ');
         String[] lines = text.split("\\r?\\n");
         List<Double> salaires = amountsForLabel(lines, LABELS_SALAIRES);
         List<Double> revenuFiscal = amountsForLabel(lines, List.of(LABEL_REVENU_FISCAL));
@@ -83,7 +91,19 @@ public class AvisImpositionService {
             .anneeRevenus(parseInt(firstGroup(ANNEE_REVENUS, text)))
             .salairesDeclares(salaires)
             .revenuFiscalReference(revenuFiscal.isEmpty() ? null : revenuFiscal.get(0))
+            .nomsDeclarants(extractDeclarants(text))
             .build();
+    }
+
+    /** Noms de naissance des declarants, espaces multiples reduits. */
+    private List<String> extractDeclarants(String text) {
+        List<String> noms = new ArrayList<>();
+        Matcher m = DECLARANT.matcher(text);
+        while (m.find()) {
+            String nom = m.group(1).trim().replaceAll("\\s+", " ");
+            if (!nom.isBlank() && !noms.contains(nom)) noms.add(nom);
+        }
+        return noms;
     }
 
     /**

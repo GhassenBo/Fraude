@@ -18,4 +18,7 @@ public class AvisImposition {
     private Integer anneeRevenus;
     private List<Double> salairesDeclares;
     private Double revenuFiscalReference;
+
+    /** Noms de naissance des declarants, dans l'ordre du document. */
+    private List<String> nomsDeclarants;
 }
