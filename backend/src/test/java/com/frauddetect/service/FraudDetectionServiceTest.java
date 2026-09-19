@@ -179,6 +179,70 @@ class FraudDetectionServiceTest {
         return (int) invoke("computeScore", List.class, checks);
     }
 
+    // ── Provenance du net a payer ────────────────────────────────────────────
+
+    @Test
+    void laProvenanceDuNetEstTransmiseAuxCalculs() throws Exception {
+        // Le defaut corrige : l'appel retombait sur la surcharge par defaut, qui
+        // annonce un net non fiable. Le net extrait visuellement etait ignore, et
+        // les controles qui le comparent ne s'executaient jamais en production.
+        org.mockito.ArgumentCaptor<Boolean> netFiable =
+            org.mockito.ArgumentCaptor.forClass(Boolean.class);
+
+        analyseAvecProvenance(true);
+
+        org.mockito.Mockito.verify(salaryService).analyzeCalculations(
+            org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.any(),
+            netFiable.capture());
+        assertThat(netFiable.getValue()).isTrue();
+    }
+
+    @Test
+    void netNonFourniParLAnalyseVisuelle_estSignaleAuxCalculs() throws Exception {
+        org.mockito.ArgumentCaptor<Boolean> netFiable =
+            org.mockito.ArgumentCaptor.forClass(Boolean.class);
+
+        analyseAvecProvenance(false);
+
+        org.mockito.Mockito.verify(salaryService).analyzeCalculations(
+            org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.any(),
+            netFiable.capture());
+        assertThat(netFiable.getValue()).isFalse();
+    }
+
+    private void analyseAvecProvenance(boolean netFromVision) throws Exception {
+        com.frauddetect.entity.User user = com.frauddetect.entity.User.builder()
+            .id(1L).email("gestionnaire@agence.fr").password("x")
+            .plan(com.frauddetect.entity.User.Plan.FREE).documentsUsed(0)
+            .build();
+
+        AnalysisResult.DocumentInfo info = AnalysisResult.DocumentInfo.builder()
+            .salaireBrut("3200.00 €").salaireNet("2527.86 €").build();
+
+        org.mockito.Mockito.when(pdfAnalyzer.analyze(org.mockito.ArgumentMatchers.any()))
+            .thenReturn(new com.frauddetect.util.PdfAnalyzer.PdfAnalysisData(
+                "texte du bulletin", new byte[]{1}, info, new ArrayList<>(), netFromVision));
+        org.mockito.Mockito.when(siretService.verify(
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+            .thenReturn(List.of());
+        org.mockito.Mockito.when(salaryService.analyzeCalculations(
+            org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.anyBoolean()))
+            .thenReturn(List.of());
+        org.mockito.Mockito.when(aiAnalysisService.analyze(
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+            .thenReturn(List.of());
+        org.mockito.Mockito.when(claudeVisionService.detectForgery(
+            org.mockito.ArgumentMatchers.any()))
+            .thenReturn(List.of());
+
+        service.analyze(new org.springframework.mock.web.MockMultipartFile(
+            "file", "bulletin.pdf", "application/pdf", new byte[]{1}), user);
+    }
+
     // ── Historique ────────────────────────────────────────────────────────────
 
     @Test

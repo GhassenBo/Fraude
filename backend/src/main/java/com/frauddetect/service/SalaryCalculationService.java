@@ -23,16 +23,26 @@ public class SalaryCalculationService {
     private static final double CHARGES_SALARIALES_MIN = 0.20;
     private static final double CHARGES_SALARIALES_MAX = 0.30;
 
+    /**
+     * Analyse sans net à payer fiable : les contrôles qui portent sur ce montant
+     * sont alors écartés. À réserver aux appelants qui ne savent pas d'où vient
+     * la valeur — le pipeline, lui, transmet toujours sa provenance.
+     */
     public List<AnalysisResult.Check> analyzeCalculations(String text, AnalysisResult.DocumentInfo docInfo) {
         return analyzeCalculations(text, docInfo, false);
     }
 
     /**
-     * @param visionEnabled true si ClaudeVisionService est actif pour cette analyse.
-     *                      Contrôle si le check Ratio Net/Brut peut s'exécuter.
+     * @param netFiable le net à payer de docInfo provient de l'analyse visuelle.
+     *                  Les contrôles qui le comparent — au net social, au brut,
+     *                  à la somme des cotisations — ne s'exécutent qu'à cette
+     *                  condition : l'extraction par expression régulière confond
+     *                  ce montant avec le net social, le net imposable ou le net
+     *                  avant prélèvement, et un écart calculé sur la mauvaise
+     *                  valeur accuserait un bulletin honnête.
      */
     public List<AnalysisResult.Check> analyzeCalculations(String text, AnalysisResult.DocumentInfo docInfo,
-                                                           boolean visionEnabled) {
+                                                           boolean netFiable) {
         List<AnalysisResult.Check> checks = new ArrayList<>();
         String[] lines = text.split("\\r?\\n");
 
@@ -47,7 +57,7 @@ public class SalaryCalculationService {
 
         // Net à payer : UNIQUEMENT Vision — la regex génère trop de faux positifs
         // (confusion avec net social, net imposable, net avant PAS).
-        Double salaireNet = visionEnabled
+        Double salaireNet = netFiable
             ? parseDocInfoAmount(docInfo != null ? docInfo.getSalaireNet() : null)
             : null;
 
@@ -107,12 +117,13 @@ public class SalaryCalculationService {
         }
 
         // Check 1: Brut vs Net ratio — nécessite la valeur Vision (pas de regex fallback)
-        if (!visionEnabled) {
+        if (!netFiable) {
             checks.add(AnalysisResult.Check.builder()
                 .category("Calculs")
                 .label("Ratio Net/Brut")
                 .status("WARNING")
-                .detail("Vérification ratio Net/Brut nécessite l'analyse Vision IA")
+                .detail("Net à payer non extrait de façon fiable — le ratio Net/Brut"
+                    + " n'a pas pu être vérifié")
                 .build());
         } else if (salaireBrut != null && salaireNet != null && salaireBrut > 0) {
             double ratio = salaireNet / salaireBrut;
@@ -221,7 +232,7 @@ public class SalaryCalculationService {
         // Check 5: Ratio Net/Brut par CCN
         // Quand Vision est actif, on utilise son net (= net avant PAS, valeur fiable).
         // Sinon, fallback sur le regex netAvantImpot, puis sur netFinal si rien d'autre.
-        Double netForCcn = (visionEnabled && salaireNet != null) ? salaireNet
+        Double netForCcn = (netFiable && salaireNet != null) ? salaireNet
             : (netAvantImpot != null ? netAvantImpot : salaireNet);
         AnalysisResult.Check ratioCcn = checkNetBrutRatio(salaireBrut, netForCcn, text, totalCotisations, exonere);
         if (ratioCcn != null) checks.add(ratioCcn);
@@ -234,7 +245,7 @@ public class SalaryCalculationService {
         // Équation : net_avant_PAS − PAS = net_final_après_PAS.
         // Source net avant PAS : Vision en priorité (fiable), regex en fallback.
         // Source net final : regex sur les lignes "net à payer" sans "avant" (valeur après déduction).
-        Double netAvantPasForCheck = (visionEnabled && salaireNet != null) ? salaireNet : netAvantImpot;
+        Double netAvantPasForCheck = (netFiable && salaireNet != null) ? salaireNet : netAvantImpot;
         Double netFinalApresPas = extractNetFinalApresPas(lines);
         AnalysisResult.Check pasCheck = checkPAS(netAvantPasForCheck, montantPAS, netFinalApresPas);
         if (pasCheck != null) checks.add(pasCheck);

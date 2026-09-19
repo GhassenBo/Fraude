@@ -66,11 +66,21 @@ public class PdfAnalyzer {
         "bulletin de remuneration"
     );
 
+    /**
+     * @param netFromVision le net a payer de documentInfo provient de l'analyse
+     *                      visuelle, et non du repli par expression reguliere.
+     *                      Les controles qui comparent le net a payer en
+     *                      dependent : la regex confond ce montant avec le net
+     *                      social, le net imposable ou le net avant
+     *                      prelevement, et les faire porter sur une valeur
+     *                      issue du repli produirait des alertes infondees.
+     */
     public record PdfAnalysisData(
         String rawText,
         byte[] pdfBytes,
         AnalysisResult.DocumentInfo documentInfo,
-        List<AnalysisResult.Check> metadataChecks
+        List<AnalysisResult.Check> metadataChecks,
+        boolean netFromVision
     ) {}
 
     public PdfAnalysisData analyze(InputStream inputStream) throws Exception {
@@ -191,10 +201,15 @@ public class PdfAnalyzer {
                 docInfo = regexInfo;
             }
 
+            // Le coalesce ci-dessus masque l'origine de chaque champ. Elle est
+            // retenue pour le net a payer, seul montant dont les controles
+            // exigent une extraction visuelle.
+            boolean netFromVision = vision != null && vision.salaireNet() != null;
+
             // Forensic structure analysis — runs inside the same open document (no double-load)
             checks.addAll(forensicsService.analyze(bytes, document));
 
-            return new PdfAnalysisData(rawText, bytes, docInfo, checks);
+            return new PdfAnalysisData(rawText, bytes, docInfo, checks, netFromVision);
         }
     }
 

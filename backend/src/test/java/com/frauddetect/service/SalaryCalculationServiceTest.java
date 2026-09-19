@@ -83,15 +83,17 @@ class SalaryCalculationServiceTest {
     }
 
     @Test
-    void ratioNetBrut_visionDisabled_shouldWarnAboutVision() {
-        // Sans Vision, le check doit retourner un WARNING explicite (pas de regex fallback)
+    void ratioNetBrut_netNonFiable_shouldWarn() {
+        // Le net vient du repli par expression reguliere : le ratio n'est pas
+        // calcule, faute de quoi il porterait peut-etre sur le net social ou le
+        // net imposable, et accuserait un bulletin honnete.
         List<AnalysisResult.Check> checks = service.analyzeCalculations(
             "net a payer\nsiret\ncotisation\nconges payes\nconvention collective",
             docInfo("2500.00 €", "1875.00 €"), false);
 
         AnalysisResult.Check check = findCheck(checks, "Ratio Net/Brut");
         assertThat(check.getStatus()).isEqualTo("WARNING");
-        assertThat(check.getDetail()).contains("Vision IA");
+        assertThat(check.getDetail()).contains("non extrait de façon fiable");
     }
 
     @Test
