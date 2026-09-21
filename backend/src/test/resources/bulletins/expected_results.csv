@@ -1,0 +1,8 @@
+case_id;file;title;expected_signals
+FP-001;01_reference_calculs_coherents.pdf;Référence - calculs cohérents;TEST_DOCUMENT_MARKER|FICTIONAL_IDENTITY|INVALID_SIRET
+FP-002;02_net_a_payer_modifie.pdf;Net à payer modifié;NET_PAYABLE_MISMATCH|VISUAL_AMOUNT_ANOMALY|TEST_DOCUMENT_MARKER
+FP-003;03_total_brut_incoherent.pdf;Total brut incohérent;GROSS_TOTAL_MISMATCH|TEST_DOCUMENT_MARKER
+FP-004;04_cotisations_incoherentes.pdf;Cotisations incohérentes;EMPLOYEE_CONTRIBUTIONS_TOTAL_MISMATCH|NET_CALCULATION_MISMATCH|TEST_DOCUMENT_MARKER
+FP-005;05_employeur_incoherent.pdf;Employeur incohérent;EMPLOYER_NAME_MISMATCH|INVALID_SIRET|TEST_DOCUMENT_MARKER
+FP-006;06_periode_cumuls_impossibles.pdf;Période et cumuls impossibles;INVALID_PAYMENT_DATE|YTD_LOWER_THAN_CURRENT|YEAR_PERIOD_MISMATCH|TEST_DOCUMENT_MARKER
+FP-007;07_identite_et_zone_alteree.pdf;Identité et zone visuellement altérées;EMPLOYEE_IDENTITY_MISMATCH|VISUAL_TAMPERING|NET_PAYABLE_MISMATCH|TEST_DOCUMENT_MARKER
