@@ -28,6 +28,11 @@ export default function App() {
       setPage('dashboard');
     }
 
+    if (params.get('session') === 'expiree') {
+      setNotice({ type: 'error', text: 'Session expirée. Reconnectez-vous pour continuer.' });
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+
     const verified = params.get('verified');
     if (verified === '1') {
       setNotice({ type: 'success', text: 'Adresse email confirmée. Vous pouvez lancer vos analyses.' });
@@ -92,7 +97,15 @@ export default function App() {
   const handleReset = () => { setResult(null); setBatchResult(null); setPage('upload'); };
 
   if (!user && page === 'upload') {
-    return <div className="app"><Header user={user} onLogout={handleLogout} onNav={setPage} /><LoginPage onLogin={handleLogin} onRegister={() => setPage('register')} /></div>;
+    // Le bandeau doit figurer ici aussi : c'est l'ecran ou atterrit une session
+    // expiree, et sans lui l'utilisateur serait deconnecte sans explication.
+    return (
+      <div className="app">
+        <Header user={user} onLogout={handleLogout} onNav={setPage} />
+        {notice && <Notice notice={notice} onClose={() => setNotice(null)} />}
+        <LoginPage onLogin={handleLogin} onRegister={() => setPage('register')} />
+      </div>
+    );
   }
   if (page === 'register') {
     return <div className="app"><Header user={user} onLogout={handleLogout} onNav={setPage} /><RegisterPage onLogin={handleLogin} onBack={() => setPage('upload')} /></div>;
