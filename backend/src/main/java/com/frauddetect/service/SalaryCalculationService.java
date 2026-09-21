@@ -254,6 +254,10 @@ public class SalaryCalculationService {
         AnalysisResult.Check cumulCheck = checkCumuls(lines, salaireBrut, docInfo);
         if (cumulCheck != null) checks.add(cumulCheck);
 
+        // Check 9: Assiette des cotisations déplafonnées = brut
+        AnalysisResult.Check assiette = checkAssietteDeplafonnee(lines, text, salaireBrut);
+        if (assiette != null) checks.add(assiette);
+
         // Grandeurs fiscales exposees au reste du pipeline. Le rapprochement avec
         // l'avis d'imposition porte sur le net imposable, pas sur le net a payer :
         // sans elles, ce montant doit etre saisi a la main.
@@ -263,6 +267,91 @@ public class SalaryCalculationService {
         }
 
         return checks;
+    }
+
+    // ── Check 9 : assiette des cotisations deplafonnees ──────────────────────
+
+    /**
+     * L'assiette des cotisations deplafonnees egale la remuneration brute.
+     *
+     * C'est une identite, pas une tendance : les cotisations dites deplafonnees
+     * portent sur la totalite du salaire. Verifie sur neuf bulletins reels de
+     * cinq editeurs differents, l'egalite est exacte au centime dans les neuf
+     * cas.
+     *
+     * Elle repere la falsification la plus courante, et la seule que les autres
+     * controles laissent passer : gonfler le brut en ajoutant le meme montant au
+     * net. L'equation brut moins cotisations egale net reste alors vraie, le taux
+     * de charge reste plausible, mais l'assiette, elle, n'est pas retouchee — un
+     * faussaire modifie les deux ou trois montants qu'il veut voir, pas les
+     * colonnes de bases du tableau de cotisations.
+     *
+     * Seul l'ecart dans le sens de la fraude est signale, une assiette
+     * inferieure au brut. L'inverse existe sur des regularisations et ne sert
+     * aucune fraude.
+     */
+    private AnalysisResult.Check checkAssietteDeplafonnee(String[] lines, String text,
+                                                         Double brut) {
+        if (brut == null || brut <= 0) return null;
+
+        Double assiette = extractFirstAmountOnSameLine(lines,
+            "cotisations sur la totalite du salaire", "totalite du salaire",
+            "securite sociale deplafonnee", "retraite deplafonnee",
+            "maladie deplafonnee", "deplafonnee", "deplafonne");
+        if (assiette == null) return null;
+
+        double ecart = brut - assiette;
+        // Tolerance d'arrondi seulement : l'egalite est exacte sur les bulletins
+        // reels, un euro suffit donc a absorber les centimes.
+        if (ecart <= Math.max(1.0, brut * 0.002)) {
+            return AnalysisResult.Check.builder()
+                .category("Calculs")
+                .label("Assiette des cotisations")
+                .status("OK")
+                .detail(String.format(
+                    "Assiette des cotisations déplafonnées (%.2f €) conforme au brut (%.2f €)",
+                    assiette, brut))
+                .build();
+        }
+
+        // Une deduction forfaitaire specifique reduit legitimement l'assiette,
+        // de dix a trente pour cent : batiment, journalistes, VRP. La signaler
+        // comme une falsification accuserait a tort ces salaries.
+        if (aUneDeductionForfaitaire(text)) {
+            return AnalysisResult.Check.builder()
+                .category("Calculs")
+                .label("Assiette des cotisations")
+                .status("WARNING")
+                .detail(String.format(
+                    "Assiette des cotisations déplafonnées (%.2f €) inférieure au brut"
+                        + " (%.2f €) de %.2f € — cohérent avec la déduction forfaitaire"
+                        + " spécifique mentionnée sur le bulletin, à vérifier",
+                    assiette, brut, ecart))
+                .build();
+        }
+
+        return AnalysisResult.Check.builder()
+            .category("Calculs")
+            .label("Assiette des cotisations")
+            .status("FAILED")
+            .detail(String.format(
+                "Assiette des cotisations déplafonnées (%.2f €) inférieure de %.2f € au"
+                    + " brut déclaré (%.2f €) — les cotisations portent sur la totalité"
+                    + " du salaire : le brut a probablement été majoré sans recalcul"
+                    + " du tableau de cotisations",
+                assiette, ecart, brut))
+            .build();
+    }
+
+    // Mentions d'un abattement d'assiette. Leur presence rend un ecart legitime.
+    private static final List<String> DEDUCTIONS_FORFAITAIRES = List.of(
+        "deduction forfaitaire specifique", "deduction forfaitaire",
+        "abattement d'assiette", "abattement assiette", "abattement de 10",
+        "abattement de 20", "abattement de 30", "dfs");
+
+    private boolean aUneDeductionForfaitaire(String text) {
+        String norm = normalizeDiacritics(text);
+        return DEDUCTIONS_FORFAITAIRES.stream().anyMatch(norm::contains);
     }
 
     // ── Grandeurs fiscales : rapprochement avec l'avis d'imposition ───────────

@@ -825,4 +825,99 @@ class SalaryCalculationServiceTest {
         assertThat(info.getNetImposable()).isNull();
         assertThat(info.getCumulNetImposable()).isNull();
     }
+
+    // ── Assiette des cotisations déplafonnées ────────────────────────────────
+
+    // Mise en page reelle : la base precede le taux et le montant sur la ligne.
+    private static final String BULLETIN_ASSIETTE =
+        "Total rémunération brute 3 224,64\n"
+        + "Cotisations sur la totalité du salaire 3 224,64 0,40 12,90 13,48 434,68\n"
+        + "Cotisations plafonnées 3 224,64 6,90 222,50 8,55 275,71\n"
+        + "Montant total des cotisations 717,48 1 141,00\n"
+        + "Montant net social 2 507,16\n"
+        + "NET À PAYER AVANT L'IMPÔT SUR LE REVENU 2 507,16\n"
+        + "siret\ncotisation\nconges payes\nconvention collective";
+
+    @Test
+    void assietteConformeAuBrut_estOK() {
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(
+            BULLETIN_ASSIETTE, docInfo("3224.64", "2507.16"), true);
+
+        assertThat(findCheck(checks, "Assiette des cotisations").getStatus()).isEqualTo("OK");
+    }
+
+    @Test
+    void brutMajoreSansRecalculDesAssiettes_estDetecte() {
+        // La falsification que les autres controles laissent passer : mille euros
+        // ajoutes au brut et au net. L'equation brut moins cotisations egale net
+        // reste vraie, le taux de charge reste plausible, mais les bases du
+        // tableau de cotisations n'ont pas ete retouchees.
+        String falsifie = BULLETIN_ASSIETTE
+            .replace("Total rémunération brute 3 224,64", "Total rémunération brute 4 224,64")
+            .replace("Montant net social 2 507,16", "Montant net social 3 507,16")
+            .replace("NET À PAYER AVANT L'IMPÔT SUR LE REVENU 2 507,16",
+                     "NET À PAYER AVANT L'IMPÔT SUR LE REVENU 3 507,16");
+
+        List<AnalysisResult.Check> checks = service.analyzeCalculations(
+            falsifie, docInfo("4224.64", "3507.16"), true);
+
+        AnalysisResult.Check check = findCheck(checks, "Assiette des cotisations");
+        assertThat(check.getStatus()).isEqualTo("FAILED");
+        assertThat(check.getDetail()).contains("1000.00");
+
+        // Les controles de coherence, eux, ne voient rien : c'est bien ce
+        // controle-ci qui porte la detection.
+        assertThat(findCheck(checks, "Cohérence des cotisations").getStatus()).isEqualTo("OK");
+    }
+
+    @Test
+    void deductionForfaitaireSpecifique_resteUnAvertissement() {
+        // Batiment, journalistes, VRP : l'assiette est legitimement abattue.
+        // Conclure a la falsification accuserait ces salaries a tort.
+        String avecAbattement = BULLETIN_ASSIETTE
+            .replace("Cotisations sur la totalité du salaire 3 224,64",
+                     "Cotisations sur la totalité du salaire 2 902,18")
+            + "\nDéduction forfaitaire spécifique 10 %";
+
+        AnalysisResult.Check check = findCheck(
+            service.analyzeCalculations(avecAbattement, docInfo("3224.64", "2507.16"), true),
+            "Assiette des cotisations");
+
+        assertThat(check.getStatus()).isEqualTo("WARNING");
+        assertThat(check.getDetail()).contains("déduction forfaitaire");
+    }
+
+    @Test
+    void assietteSuperieureAuBrut_neConclutPas() {
+        // Cas des regularisations : l'ecart existe mais ne sert aucune fraude.
+        String regularisation = BULLETIN_ASSIETTE
+            .replace("Cotisations sur la totalité du salaire 3 224,64",
+                     "Cotisations sur la totalité du salaire 3 500,00");
+
+        assertThat(findCheck(
+            service.analyzeCalculations(regularisation, docInfo("3224.64", "2507.16"), true),
+            "Assiette des cotisations").getStatus()).isEqualTo("OK");
+    }
+
+    @Test
+    void libelleSecuriteSocialeDeplafonnee_estReconnu() {
+        // Autre editeur : la ligne porte la base deux fois, part salariale puis
+        // part patronale. La premiere valeur est l'assiette.
+        String text = "Salaire brut 1 619.78\n"
+            + "Sécurité Sociale déplafonnée 1 619.78 0.4000 6.48 1 619.78 1.9000 30.78\n"
+            + "siret\ncotisation\nconges payes\nconvention collective";
+
+        assertThat(findCheck(
+            service.analyzeCalculations(text, docInfo("1619.78", "1500.00"), true),
+            "Assiette des cotisations").getStatus()).isEqualTo("OK");
+    }
+
+    @Test
+    void sansLigneDeplafonnee_aucunControle() {
+        // Rien a comparer : mieux vaut ne rien dire qu'inventer un ecart.
+        assertThat(service.analyzeCalculations(
+            "Rémunération brute 3 200,00\nsiret\ncotisation\nconges payes\nconvention collective",
+            docInfo("3200.00", "2500.00"), true))
+            .noneMatch(c -> "Assiette des cotisations".equals(c.getLabel()));
+    }
 }
