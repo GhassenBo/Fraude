@@ -412,32 +412,46 @@ class SalaryCalculationServiceTest {
     }
 
     @Test
-    void checkPAS_netFinalFalsified_shouldWarn() {
-        // Vision returns net avant PAS = 3036.60 ; PAS = 170.88 → expected = 2865.72
-        // but net final in doc = 3507.16 (falsifié +641€)
+    void checkPAS_netFinalFalsifie_estUnEchec() {
+        // Net avant PAS 3 036,60, impot 170,88, donc 2 865,72 attendus. Le
+        // document annonce 3 507,16, soit 641 EUR de plus que le net avant
+        // prelevement : impossible, l'impot ne peut que diminuer le versement.
         String text = "net a payer avant impot 3 036,60\n" +
             "prelevement a la source 170,88\n" +
             "net a payer 3 507,16\nsiret\ncotisation\nconges payes\nconvention collective";
 
         List<AnalysisResult.Check> checks = service.analyzeCalculations(
-            text, docInfo("4000.00 €", "3036.60 €"), true);
+            text, docInfo("4000.00 €", "3507.16 €"), true);
 
         AnalysisResult.Check check = findCheck(checks, "Prélèvement à la source");
-        assertThat(check.getStatus()).isEqualTo("WARNING");
-        assertThat(check.getDetail()).contains("incohérence");
+        assertThat(check.getStatus()).isEqualTo("FAILED");
+        assertThat(check.getDetail()).contains("supérieur au net avant prélèvement");
     }
 
     @Test
-    void checkPAS_noPasLine_netsSimilar_checkSkipped() {
+    void checkPAS_sansLigneDImpot_deduitUnTauxNul() {
+        // Aucun montant d'impot lisible, mais les deux nets concordent : le taux
+        // implicite vaut zero, ce qui est coherent et vaut d'etre dit. Se taire
+        // laisserait croire que rien n'a ete verifie.
         String text = "net a payer avant impot 865,72\n" +
-            "net a payer\nsiret\ncotisation\nconges payes\nconvention collective";
+            "net a payer 865,72\nsiret\ncotisation\nconges payes\nconvention collective";
 
+        AnalysisResult.Check check = findCheck(service.analyzeCalculations(
+            text, docInfo("1200.00 €", "865.72 €"), true), "Prélèvement à la source");
+
+        assertThat(check.getStatus()).isEqualTo("OK");
+        assertThat(check.getDetail()).contains("taux implicite de 0.0%");
+    }
+
+    @Test
+    void checkPAS_sansNetAvantPasNiImpot_aucunControle() {
+        // Rien a confronter : comparer le net a payer a lui-meme conclurait
+        // toujours a la coherence et rassurerait a tort.
         List<AnalysisResult.Check> checks = service.analyzeCalculations(
-            text, docInfo("1200.00 €", "865.72 €"), true);
+            "net a payer 3 000,00\nsiret\ncotisation\nconges payes\nconvention collective",
+            docInfo("4000.00 €", "3000.00 €"), true);
 
-        boolean hasPasCheck = checks.stream()
-            .anyMatch(c -> "Prélèvement à la source".equals(c.getLabel()));
-        assertThat(hasPasCheck).isFalse();
+        assertThat(checks).noneMatch(c -> "Prélèvement à la source".equals(c.getLabel()));
     }
 
     @Test
@@ -824,6 +838,103 @@ class SalaryCalculationServiceTest {
 
         assertThat(info.getNetImposable()).isNull();
         assertThat(info.getCumulNetImposable()).isNull();
+    }
+
+    // ── Distinction des trois nets ───────────────────────────────────────────
+
+    // Mise en page ou la base precede le taux, et ou le net a payer se distingue
+    // du net avant prelevement. Valeurs internes exactes.
+    private static final String BULLETIN_TROIS_NETS =
+        "TOTAL BRUT 3 750,00\n"
+        + "Santé 3 750,00 0,750 % 28,13 487,50\n"
+        + "Vieillesse plafonnée 3 728,99 6,900 % 257,25 317,00\n"
+        + "Vieillesse déplafonnée 3 750,00 0,400 % 15,00 71,25\n"
+        + "Retraite complémentaire T1 3 750,00 3,150 % 118,13 177,19\n"
+        + "CEG T1 3 750,00 0,860 % 32,25 64,88\n"
+        + "CSG déductible 3 684,38 6,800 % 250,54\n"
+        + "CSG/CRDS non déductible 3 684,38 2,900 % 106,85\n"
+        + "Net avant impôt 2 941,85\n"
+        + "Net imposable 3 050,00\n"
+        + "Prélèvement à la source (7,00 %) 213,50\n"
+        + "NET À PAYER 2 728,35\n"
+        + "siret\ncotisation\nconges payes\nconvention collective";
+
+    @Test
+    void baseAvantTaux_laColonnePatronaleNEstPasSommee() {
+        // La somme salariale vaut 808,15 : 3 750,00 − 808,15 = 2 941,85, le net
+        // avant prelevement. En sommant la colonne patronale — 1 117,82 — le
+        // controle accusait ce bulletin sain.
+        AnalysisResult.Check check = findCheck(service.analyzeCalculations(
+            BULLETIN_TROIS_NETS, docInfo("3750.00", "2728.35"), true),
+            "Somme des cotisations");
+
+        assertThat(check.getStatus()).isEqualTo("OK");
+        assertThat(check.getDetail()).contains("808.15").contains("7 lignes");
+    }
+
+    @Test
+    void sommeDesCotisations_comparaisonAuNetAvantPrelevement() {
+        // Comparee au net a payer, la difference vaudrait les 213,50 EUR de
+        // l'impot sur n'importe quel bulletin sain.
+        AnalysisResult.Check check = findCheck(service.analyzeCalculations(
+            BULLETIN_TROIS_NETS, docInfo("3750.00", "2728.35"), true),
+            "Somme des cotisations");
+
+        assertThat(check.getDetail()).contains("Net avant PAS (2941.85");
+    }
+
+    @Test
+    void libelleNetAvantImpot_estReconnu() {
+        // Sans ce libelle, le net imposable — 3 050,00, troisieme grandeur —
+        // etait pris pour le net avant prelevement, faussant le controle de
+        // l'impot d'une centaine d'euros.
+        AnalysisResult.Check check = findCheck(service.analyzeCalculations(
+            BULLETIN_TROIS_NETS, docInfo("3750.00", "2728.35"), true),
+            "Prélèvement à la source");
+
+        assertThat(check.getStatus()).isEqualTo("OK");
+        assertThat(check.getDetail()).contains("2941.85").contains("213.50");
+    }
+
+    @Test
+    void netAPayerMajore_estUnEchecDuControleDeLImpot() {
+        // Mille euros ajoutes au seul net a payer : il depasse alors le net avant
+        // prelevement, ce qu'aucun impot ne permet.
+        String falsifie = BULLETIN_TROIS_NETS
+            .replace("NET À PAYER 2 728,35", "NET À PAYER 3 728,35");
+
+        AnalysisResult.Check check = findCheck(service.analyzeCalculations(
+            falsifie, docInfo("3750.00", "3728.35"), true), "Prélèvement à la source");
+
+        assertThat(check.getStatus()).isEqualTo("FAILED");
+    }
+
+    @Test
+    void ligneDImpotSansMontantLisible_neConfondPasLaBase() {
+        // "1 143,74 0,0000 -" : seule la base est lisible, l'impot etant marque
+        // d'un tiret. La retourner ferait passer la base pour l'impot.
+        String text = "Net avant impôt 1 112,05\n"
+            + "Impôt sur le revenu prélevé à la source 1 143,74 0,0000 -\n"
+            + "NET À PAYER 1 112,05\n"
+            + "siret\ncotisation\nconges payes\nconvention collective";
+
+        AnalysisResult.Check check = findCheck(service.analyzeCalculations(
+            text, docInfo("1112.05", "1112.05"), true), "Prélèvement à la source");
+
+        assertThat(check.getStatus()).isEqualTo("OK");
+    }
+
+    @Test
+    void impotNulEnTroisColonnes_estLu() {
+        // "2 629,98 0,00 0,00" : base, taux, montant. Le montant est le dernier.
+        String text = "Net avant impôt 2 511,00\n"
+            + "Impôt sur le revenu prélevé à la source 2 629,98 0,00 0,00\n"
+            + "Net payé en euros 2 511,00\n"
+            + "siret\ncotisation\nconges payes\nconvention collective";
+
+        assertThat(findCheck(service.analyzeCalculations(
+            text, docInfo("3224.64", "2511.00"), true), "Prélèvement à la source")
+            .getStatus()).isEqualTo("OK");
     }
 
     // ── Assiette des cotisations déplafonnées ────────────────────────────────

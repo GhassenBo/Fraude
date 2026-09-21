@@ -55,9 +55,14 @@ public class SalaryCalculationService {
                 "brut total", "total brut", "brut fiscal", "brut :");
         }
 
-        // Net à payer : UNIQUEMENT Vision — la regex génère trop de faux positifs
-        // (confusion avec net social, net imposable, net avant PAS).
-        Double salaireNet = netFiable
+        // Net À PAYER, prélèvement à la source déjà déduit : c'est la grandeur que
+        // l'analyse visuelle renvoie, et elle ne doit pas être confondue avec le
+        // net avant PAS extrait plus bas. Les deux diffèrent du montant de
+        // l'impôt, soit zéro à quarante-cinq pour cent du net.
+        //
+        // Extraction visuelle uniquement : la regex génère trop de faux positifs
+        // sur ce montant (confusion avec net social, net imposable, net avant PAS).
+        Double netAPayer = netFiable
             ? parseDocInfoAmount(docInfo != null ? docInfo.getSalaireNet() : null)
             : null;
 
@@ -75,36 +80,56 @@ public class SalaryCalculationService {
         Double netSocial = extractAmountNearLabel(lines,
             "montant net social", "net social");
 
-        // Net avant impôt sur le revenu (= net avant PAS).
-        // Distinct du net à payer final : le PAS varie de 0% à 45% selon l'employé
-        // et ne doit pas fausser le ratio CCN ni le check cohérence cotisations.
+        // Net avant prélèvement à la source, la grandeur sur laquelle portent les
+        // identités comptables : brut − cotisations = net avant PAS, puis
+        // net avant PAS − PAS = net à payer.
+        //
         // Les variantes avec apostrophe sont indispensables : normalizeDiacritics
         // retire les accents mais pas l'apostrophe, et le libelle reglementaire
         // s'imprime "NET A PAYER AVANT L'IMPOT SUR LE REVENU" sur une partie des
-        // bulletins. Sans elles, ni le controle des cotisations ni celui du
-        // prelevement a la source ne s'executaient sur ces bulletins.
-        Double netAvantImpot = extractAmountPreferSameLine(lines,
+        // bulletins.
+        //
+        // "Net imposable" n'y figure pas : c'est une troisieme grandeur, qui
+        // inclut la CSG non deductible et les avantages en nature. L'employer
+        // comme substitut faussait le controle du prelevement a la source de la
+        // valeur de cet ecart, une centaine d'euros sur les bulletins reels.
+        Double netAvantPas = extractAmountPreferSameLine(lines,
             "net a payer avant impot sur le revenu",
             "net a payer avant l'impot sur le revenu",
             "net a payer avant impot",
             "net a payer avant l'impot",
+            "net avant impot sur le revenu",
+            "net avant l'impot sur le revenu",
+            "net avant impot",
             "net avant l'impot",
             "net avant prelevement a la source",
-            "net avant prelevement",
-            "net imposable");
+            "net avant prelevement");
 
         // Montant du prélèvement à la source — extraction sur la même ligne uniquement.
         // La fenêtre ±4 lignes de extractAmountNearLabel retournerait le net avant impôt
         // (valeur plus grande, adjacente) au lieu du PAS lui-même.
-        Double montantPAS = extractAmountOnSameLine(lines,
-            "prelevement a la source",
-            "retenue a la source");
+        Double montantPAS = extractMontantPas(lines);
+
+        // Valeur reellement libellee sur le document, avant tout repli : elle
+        // seule autorise les controles qui comparent deux grandeurs distinctes.
+        Double netAvantPasLibelle = netAvantPas;
+
+        // A defaut de libelle, le net a payer tient lieu de net avant prelevement
+        // quand rien n'indique qu'un impot a ete preleve : les deux montants sont
+        // alors le meme. Ce repli evite d'eteindre les identites comptables sur
+        // les bulletins a taux nul, sans jamais inventer d'ecart — des qu'un
+        // prelevement est effectivement annonce, l'absence de libelle rend les
+        // controles muets plutot que faux.
+        if (netAvantPas == null && netAPayer != null
+                && (montantPAS == null || montantPAS < 0.01)) {
+            netAvantPas = netAPayer;
+        }
 
         // Check 0: Net social vs Net à payer cross-validation
         // Invariant comptable : Net à payer = Net social − Impôt ≤ Net social (toujours)
         // On évite d'extraire l'impôt (labels ambigus, confusions avec bases CSG)
         // et on vérifie simplement que Net à payer ne dépasse pas Net social.
-        if (salaireNet != null && netSocial != null && salaireNet > netSocial + 50) {
+        if (netAPayer != null && netSocial != null && netAPayer > netSocial + 50) {
             checks.add(AnalysisResult.Check.builder()
                 .category("Calculs")
                 .label("Cohérence Net social / Net à payer")
@@ -112,7 +137,7 @@ public class SalaryCalculationService {
                 .detail(String.format(
                     "Net à payer (%.2f€) supérieur au Net social (%.2f€) — impossible,"
                         + " le net à payer a probablement été falsifié",
-                    salaireNet, netSocial))
+                    netAPayer, netSocial))
                 .build());
         }
 
@@ -125,14 +150,14 @@ public class SalaryCalculationService {
                 .detail("Net à payer non extrait de façon fiable — le ratio Net/Brut"
                     + " n'a pas pu être vérifié")
                 .build());
-        } else if (salaireBrut != null && salaireNet != null && salaireBrut > 0) {
-            double ratio = salaireNet / salaireBrut;
+        } else if (salaireBrut != null && netAPayer != null && salaireBrut > 0) {
+            double ratio = netAPayer / salaireBrut;
             if (ratio > 1.0) {
                 checks.add(AnalysisResult.Check.builder()
                     .category("Calculs")
                     .label("Ratio Net/Brut")
                     .status("FAILED")
-                    .detail(String.format("Net (%.2f€) supérieur au Brut (%.2f€) — impossible", salaireNet, salaireBrut))
+                    .detail(String.format("Net (%.2f€) supérieur au Brut (%.2f€) — impossible", netAPayer, salaireBrut))
                     .build());
             } else if (ratio > 0.93) {
                 checks.add(AnalysisResult.Check.builder()
@@ -167,7 +192,7 @@ public class SalaryCalculationService {
 
         // Check 2: Cotisations coherence
         // Use net avant PAS (before income tax) to avoid counting PAS as a missing cotisation
-        Double netForCotisCheck = netAvantImpot != null ? netAvantImpot : salaireNet;
+        Double netForCotisCheck = netAvantPas;
         // L'equation brut - net = cotisations ne tient que si rien ne s'ajoute ni ne
         // se retire au net apres cotisations. Interessement, titres-restaurant ou
         // remboursements de frais la rendent fausse sans qu'il y ait anomalie.
@@ -230,25 +255,35 @@ public class SalaryCalculationService {
         checks.addAll(checkRequiredFields(text));
 
         // Check 5: Ratio Net/Brut par CCN
-        // Quand Vision est actif, on utilise son net (= net avant PAS, valeur fiable).
-        // Sinon, fallback sur le regex netAvantImpot, puis sur netFinal si rien d'autre.
-        Double netForCcn = (netFiable && salaireNet != null) ? salaireNet
-            : (netAvantImpot != null ? netAvantImpot : salaireNet);
+        // La plage conventionnelle est calibree sur le net avant PAS. Y injecter
+        // le net a payer, ampute de l'impot, ecartait le ratio de sa plage sans
+        // qu'aucune anomalie n'existe.
+        Double netForCcn = netAvantPas;
         AnalysisResult.Check ratioCcn = checkNetBrutRatio(salaireBrut, netForCcn, text, totalCotisations, exonere);
         if (ratioCcn != null) checks.add(ratioCcn);
 
         // Check 6: Somme individuelle des lignes de cotisations
-        AnalysisResult.Check cotisSum = checkCotisationsSum(text, salaireBrut, salaireNet);
+        AnalysisResult.Check cotisSum = checkCotisationsSum(text, salaireBrut, netAvantPas);
         if (cotisSum != null) checks.add(cotisSum);
 
         // Check 7: Cohérence prélèvement à la source
         // Équation : net_avant_PAS − PAS = net_final_après_PAS.
         // Source net avant PAS : Vision en priorité (fiable), regex en fallback.
         // Source net final : regex sur les lignes "net à payer" sans "avant" (valeur après déduction).
-        Double netAvantPasForCheck = (netFiable && salaireNet != null) ? salaireNet : netAvantImpot;
-        Double netFinalApresPas = extractNetFinalApresPas(lines);
-        AnalysisResult.Check pasCheck = checkPAS(netAvantPasForCheck, montantPAS, netFinalApresPas);
-        if (pasCheck != null) checks.add(pasCheck);
+        // Sans net avant prelevement libelle ni montant d'impot, il n'y a rien a
+        // confronter : le repli comparerait le net a payer a lui-meme et
+        // conclurait toujours a la coherence, ce qui rassurerait a tort.
+        if (netAvantPasLibelle != null || montantPAS != null) {
+            // La ligne "net a payer" du document est ciblee precisement, tandis
+            // que l'analyse visuelle ne renvoie qu'un net parmi plusieurs et
+            // peut rapporter celui d'avant prelevement. Le texte prime donc, et
+            // la valeur visuelle ne sert qu'a defaut.
+            Double netTexte = extractNetFinalApresPas(lines);
+            Double netFinalApresPas = netTexte != null ? netTexte : netAPayer;
+            AnalysisResult.Check pasCheck =
+                checkPAS(netAvantPas, montantPAS, netFinalApresPas);
+            if (pasCheck != null) checks.add(pasCheck);
+        }
 
         // Check 8: Cohérence des cumuls annuels
         AnalysisResult.Check cumulCheck = checkCumuls(lines, salaireBrut, docInfo);
@@ -262,7 +297,7 @@ public class SalaryCalculationService {
         // l'avis d'imposition porte sur le net imposable, pas sur le net a payer :
         // sans elles, ce montant doit etre saisi a la main.
         if (docInfo != null) {
-            docInfo.setNetImposable(extractNetImposable(lines, netAvantImpot));
+            docInfo.setNetImposable(extractNetImposable(lines, netAvantPasLibelle));
             docInfo.setCumulNetImposable(extractCumulNetImposable(lines));
         }
 
@@ -727,23 +762,131 @@ public class SalaryCalculationService {
      * Un écart > 2€ indique que le net à payer a pu être falsifié après génération.
      * Ignoré silencieusement si net avant impôt ou net final ne sont pas disponibles.
      */
+    // Le participe est la forme la plus repandue sur les bulletins reels :
+    // "Impot sur le revenu preleve a la source".
+    private static final List<String> LABELS_PAS = List.of(
+        "prelevement a la source", "preleve a la source",
+        "prelevee a la source", "retenue a la source");
+
+    /**
+     * Montant du prelevement a la source.
+     *
+     * La ligne presente trois colonnes : base, taux, montant. Le montant est donc
+     * le dernier. Une ligne qui n'en porte qu'un seul n'expose que sa base, l'impot
+     * etant nul ou marque d'un tiret : retourner cette base la ferait passer pour
+     * un impot de plusieurs milliers d'euros. Mieux vaut alors ne rien affirmer et
+     * deduire l'impot de l'ecart entre les deux nets.
+     */
+    private Double extractMontantPas(String[] lines) {
+        for (String line : lines) {
+            String norm = normalizeDiacritics(line);
+            if (LABELS_PAS.stream().noneMatch(norm::contains)) continue;
+
+            List<Double> montants = new ArrayList<>();
+            Matcher m = AMOUNT_PATTERN.matcher(line);
+            while (m.find()) {
+                try {
+                    montants.add(Double.parseDouble(
+                        m.group().replaceAll("[\\s\u00a0]", "").replace(",", ".")));
+                } catch (NumberFormatException ignored) {}
+            }
+            if (montants.isEmpty()) continue;
+
+            // La ligne expose au plus trois colonnes : base, taux, montant. Un
+            // taux accompagnant un montant unique signale que seule la base est
+            // lisible, l'impot etant marque d'un tiret : la retourner le ferait
+            // passer pour un impot de plusieurs milliers d'euros.
+            boolean porteUnTaux = TAUX_COTISATION.matcher(line).find()
+                || TAUX_SANS_POURCENT.matcher(line).find();
+            if (porteUnTaux && montants.size() < 2) continue;
+
+            return montants.get(montants.size() - 1);
+        }
+        return null;
+    }
+
+    // Taux imprime sans signe pourcent, reconnaissable a ses decimales :
+    // "0,0000", "7,9000".
+    private static final Pattern TAUX_SANS_POURCENT = Pattern.compile(
+        "(?<![0-9.,])[0-9]{1,2}[.,][0-9]{3,4}(?![0-9])");
+
+    /** Taux de prelevement a la source au-dela duquel le montant devient suspect. */
+    private static final double TAUX_PAS_MAX = 0.45;
+
+    /**
+     * Controle du prelevement quand son montant n'est pas lisible : l'impot est
+     * alors deduit de l'ecart entre le net avant prelevement et le net a payer.
+     *
+     * Deux verdicts possibles. Un net a payer superieur au net avant prelevement
+     * est impossible, l'impot ne pouvant qu'abaisser le montant verse. Un taux
+     * implicite au-dela du taux maximal du bareme est douteux sans etre
+     * impossible : le prelevement peut etre majore sur demande du salarie.
+     */
+    private AnalysisResult.Check checkPasImplicite(double netAvantPas, double netFinal) {
+        double impotImplicite = netAvantPas - netFinal;
+
+        if (impotImplicite < -2) {
+            return AnalysisResult.Check.builder()
+                .category("Calculs")
+                .label("Prélèvement à la source")
+                .status("FAILED")
+                .detail(String.format(
+                    "Net à payer (%.2f€) supérieur au net avant prélèvement à la source"
+                        + " (%.2f€) — impossible, l'impôt ne peut que diminuer le montant"
+                        + " versé : écart de %.2f€",
+                    netFinal, netAvantPas, -impotImplicite))
+                .build();
+        }
+
+        double taux = netAvantPas > 0 ? impotImplicite / netAvantPas : 0;
+        if (taux > TAUX_PAS_MAX) {
+            return AnalysisResult.Check.builder()
+                .category("Calculs")
+                .label("Prélèvement à la source")
+                .status("WARNING")
+                .detail(String.format(
+                    "Écart de %.2f€ entre le net avant prélèvement (%.2f€) et le net à"
+                        + " payer (%.2f€), soit un taux implicite de %.1f%% — au-delà du"
+                        + " barème, à moins d'un taux majoré sur demande",
+                    impotImplicite, netAvantPas, netFinal, taux * 100))
+                .build();
+        }
+
+        return AnalysisResult.Check.builder()
+            .category("Calculs")
+            .label("Prélèvement à la source")
+            .status("OK")
+            .detail(String.format(
+                "Net avant prélèvement (%.2f€) − net à payer (%.2f€) = %.2f€,"
+                    + " soit un taux implicite de %.1f%% — cohérent",
+                netAvantPas, netFinal, impotImplicite, taux * 100))
+            .build();
+    }
+
     private AnalysisResult.Check checkPAS(Double netAvantImpot, Double pas, Double netFinal) {
         if (netAvantImpot == null || netFinal == null) return null;
 
-        if (pas == null) {
-            // No PAS line found — either rate is 0% or label not recognized.
-            if (Math.abs(netAvantImpot - netFinal) > 2) {
-                return AnalysisResult.Check.builder()
-                    .category("Calculs")
-                    .label("Prélèvement à la source")
-                    .status("WARNING")
-                    .detail(String.format(
-                        "Net avant PAS (%.2f€) ≠ Net final (%.2f€) mais aucune ligne PAS trouvée"
-                            + " — vérifier le libellé du prélèvement à la source",
-                        netAvantImpot, netFinal))
-                    .build();
-            }
-            return null;
+        // Montant du prelevement introuvable, ou superieur au net dont il se
+        // deduit, donc mal lu : il reste deductible de l'ecart entre les deux
+        // nets. Se plaindre d'un libelle n'apprendrait rien a l'utilisateur,
+        // alors que le taux implicite, lui, est verifiable.
+        if (pas == null || pas >= netAvantImpot) {
+            return checkPasImplicite(netAvantImpot, netFinal);
+        }
+
+        // Un net a payer superieur au net avant prelevement est impossible, quel
+        // que soit le montant de l'impot : celui-ci ne peut que le diminuer.
+        if (netFinal > netAvantImpot + 2) {
+            return AnalysisResult.Check.builder()
+                .category("Calculs")
+                .label("Prélèvement à la source")
+                .status("FAILED")
+                .detail(String.format(
+                    "Net à payer (%.2f€) supérieur au net avant prélèvement (%.2f€)"
+                        + " alors que le bulletin annonce %.2f€ d'impôt — le net à payer"
+                        + " a probablement été majoré",
+                    netFinal, netAvantImpot, pas))
+                .build();
         }
 
         double calculatedNet = netAvantImpot - pas;
@@ -753,7 +896,9 @@ public class SalaryCalculationService {
             return AnalysisResult.Check.builder()
                 .category("Calculs")
                 .label("Prélèvement à la source")
-                .status("WARNING")
+                // Au-dela de cinquante euros, l'ecart ne s'explique plus par un
+                // arrondi ni par une ligne annexe.
+                .status(ecart > 50 ? "FAILED" : "WARNING")
                 .detail(String.format(
                     "Net avant PAS (%.2f€) − PAS (%.2f€) = %.2f€ ≠ Net à payer (%.2f€)"
                         + " — écart de %.2f€, incohérence prélèvement à la source",
@@ -772,37 +917,86 @@ public class SalaryCalculationService {
 
     // ── Check 6 : Somme des cotisations salarié ───────────────────────────────
 
-    // Regex cotisation — format standard : "Label   taux%   base   montant_sal"
-    // Exclut les lignes résumé (total, cumul, net, brut…) et les lignes sans taux.
-    // [0-9]{1,6} pour la base couvre les salaires jusqu'à 999 999 € (ex: "3000,00" ou "3 000,00").
-    private static final Pattern COTIS_LINE = Pattern.compile(
-        "(?im)" +
-        "^(?!\\s*(?:total|cumul|net\\b|brut\\b|salaire\\b|remun|base\\b|libelle|periode|conge|prime\\b)).{0,65}?" +
-        "\\d{1,2}[.,]\\d{2,4}\\s*%" +                                // taux (non capturé)
-        "\\s+[0-9]{1,6}(?:[\\s\u00a0][0-9]{3})*[.,][0-9]{2}(?![0-9%])" + // base (non capturé, jusqu'à 6 chiffres)
-        "\\s+([0-9]{1,5}(?:[\\s\u00a0][0-9]{3})*[.,][0-9]{2})(?![0-9%])"  // montant salarié (capturé)
-    );
+    // Taux d'une ligne de cotisation : "6,900 %", "0,40 %".
+    private static final Pattern TAUX_COTISATION = Pattern.compile(
+        "([0-9]{1,2}[.,][0-9]{1,4})\\s*%");
+
+    // Lignes de synthese : elles portent des montants sans etre des cotisations.
+    private static final Pattern LIGNE_DE_SYNTHESE = Pattern.compile(
+        "(?i)^\\s*(?:total|cumul|net\\b|brut\\b|salaire\\b|remun|base\\b|libelle"
+            + "|periode|conge|prime\\b|assiette)");
 
     /**
-     * Somme les montants salarié de chaque ligne de cotisation (format : label taux% base montant).
-     * Vérifie que Brut − somme ≈ Net (tolérance 50€).
-     * Retourne null si moins de 3 lignes sont détectées (pas assez pour être fiable).
+     * Montant salarial d'une ligne de cotisation, confirme par l'arithmetique.
+     *
+     * L'ordre des colonnes varie d'un editeur a l'autre : le taux precede la base
+     * chez certains, la suit chez d'autres. Plutot que de supposer une mise en
+     * page, on retient le montant que le calcul confirme, celui qui vaut la base
+     * multipliee par le taux.
+     *
+     * La version precedente supposait l'ordre "taux, base, montant" et, sur la
+     * mise en page inverse, sommait la colonne patronale : 1 117,82 EUR au lieu de
+     * 808,15 EUR sur le jeu de tests, soit un ecart inexistant impute a un
+     * bulletin sain. Un montant que le calcul ne confirme pas est desormais
+     * ignore, et le controle s'efface s'il n'en confirme pas assez.
+     */
+    private Double montantSalarialConfirme(String line) {
+        if (LIGNE_DE_SYNTHESE.matcher(line).find()) return null;
+
+        List<Double> montants = new ArrayList<>();
+        Matcher m = AMOUNT_PATTERN.matcher(line);
+        while (m.find()) {
+            try {
+                montants.add(Double.parseDouble(
+                    m.group().replaceAll("[\\s\u00a0]", "").replace(",", ".")));
+            } catch (NumberFormatException ignored) {}
+        }
+
+        Matcher taux = TAUX_COTISATION.matcher(line);
+        while (taux.find()) {
+            double t;
+            try {
+                t = Double.parseDouble(taux.group(1).replace(",", ".")) / 100.0;
+            } catch (NumberFormatException e) {
+                continue;
+            }
+            if (t <= 0) continue;
+
+            for (Double base : montants) {
+                for (Double montant : montants) {
+                    if (base <= montant) continue; // une base depasse son montant
+                    // Tolerance d'arrondi : le taux imprime est lui-meme arrondi.
+                    if (Math.abs(base * t - montant) <= Math.max(0.05, montant * 0.01)) {
+                        return montant;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Verifie que le brut moins la somme des lignes de cotisation salariale donne
+     * le net avant prelevement a la source.
+     *
+     * Le net a payer ne convient pas : l'impot y est deja deduit, et l'ecart
+     * vaudrait mecaniquement le montant de ce prelevement sur n'importe quel
+     * bulletin sain — c'etait la source d'un echec systematique.
      */
     private AnalysisResult.Check checkCotisationsSum(String text, Double brut, Double net) {
         if (brut == null || net == null || brut <= 0) return null;
 
         double sum = 0;
         int count = 0;
-        Matcher m = COTIS_LINE.matcher(text);
-        while (m.find()) {
-            String raw = m.group(1).replaceAll("[\\s\u00a0]", "").replace(",", ".");
-            try {
-                double val = Double.parseDouble(raw);
-                if (val >= 0.5 && val < Math.max(5000, brut != null ? brut * 0.5 : 5000)) { sum += val; count++; }
-            } catch (NumberFormatException ignored) {}
+        for (String line : text.split("\\r?\\n")) {
+            Double montant = montantSalarialConfirme(line);
+            if (montant != null && montant > 0 && montant < brut) {
+                sum += montant;
+                count++;
+            }
         }
 
-        if (count < 3) return null; // pas assez de lignes extraites pour être fiable
+        if (count < 3) return null; // pas assez de lignes confirmées pour être fiable
 
         double expectedNet = brut - sum;
         double ecart = Math.abs(expectedNet - net);
@@ -813,7 +1007,8 @@ public class SalaryCalculationService {
                 .label("Somme des cotisations")
                 .status("FAILED")
                 .detail(String.format(
-                    "Brut (%.2f€) − cotisations salarié (%.2f€, %d lignes) = %.2f€ ≠ Net (%.2f€) — écart de %.2f€",
+                    "Brut (%.2f€) − cotisations salarié (%.2f€, %d lignes confirmées) = %.2f€"
+                        + " ≠ Net avant PAS (%.2f€) — écart de %.2f€",
                     brut, sum, count, expectedNet, net, ecart))
                 .build();
         } else if (ecart > 20) {
@@ -822,7 +1017,8 @@ public class SalaryCalculationService {
                 .label("Somme des cotisations")
                 .status("WARNING")
                 .detail(String.format(
-                    "Brut − cotisations salarié (%.2f€, %d lignes) = %.2f€, Net = %.2f€ — écart %.2f€ (possible prime ou arrondi)",
+                    "Brut − cotisations salarié (%.2f€, %d lignes confirmées) = %.2f€,"
+                        + " Net avant PAS = %.2f€ — écart %.2f€ (possible prime ou arrondi)",
                     sum, count, expectedNet, net, ecart))
                 .build();
         }
@@ -831,7 +1027,8 @@ public class SalaryCalculationService {
             .label("Somme des cotisations")
             .status("OK")
             .detail(String.format(
-                "Brut (%.2f€) − cotisations salarié (%.2f€, %d lignes) ≈ Net (%.2f€) — cohérent (écart %.2f€)",
+                "Brut (%.2f€) − cotisations salarié (%.2f€, %d lignes confirmées) ≈ Net avant PAS"
+                + " (%.2f€) — cohérent (écart %.2f€)",
                 brut, sum, count, net, ecart))
             .build();
     }
