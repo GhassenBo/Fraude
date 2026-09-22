@@ -937,6 +937,146 @@ class SalaryCalculationServiceTest {
             .getStatus()).isEqualTo("OK");
     }
 
+    // ── Total des cotisations ────────────────────────────────────────────────
+
+    @Test
+    void totalAfficheConformeALaSommeDesLignes_estOK() {
+        AnalysisResult.Check check = findCheck(service.analyzeCalculations(
+            BULLETIN_TROIS_NETS.replace("TOTAL BRUT 3 750,00",
+                "TOTAL BRUT 3 750,00\nTOTAL COTISATIONS 808,15 1 537,50"),
+            docInfo("3750.00", "2728.35"), true), "Total des cotisations");
+
+        assertThat(check.getStatus()).isEqualTo("OK");
+    }
+
+    @Test
+    void totalMinore_estDetecte() {
+        // Minorer le total sans toucher aux lignes permet d'annoncer un net plus
+        // eleve. Le total ne peut pourtant pas etre inferieur a ce qu'il agrege.
+        AnalysisResult.Check check = findCheck(service.analyzeCalculations(
+            BULLETIN_TROIS_NETS.replace("TOTAL BRUT 3 750,00",
+                "TOTAL BRUT 3 750,00\nTOTAL COTISATIONS 608,15 1 537,50"),
+            docInfo("3750.00", "2728.35"), true), "Total des cotisations");
+
+        assertThat(check.getStatus()).isEqualTo("FAILED");
+        assertThat(check.getDetail()).contains("200.00").contains("808.15");
+    }
+
+    @Test
+    void libelleTotalCotisationsCourt_estReconnu() {
+        // "TOTAL COTISATIONS", sans autre mot, manquait a la liste des libelles :
+        // le total n'etait pas lu, et le controle ne s'executait pas du tout.
+        assertThat(service.analyzeCalculations(
+            BULLETIN_TROIS_NETS.replace("TOTAL BRUT 3 750,00",
+                "TOTAL BRUT 3 750,00\nTOTAL COTISATIONS 608,15"),
+            docInfo("3750.00", "2728.35"), true))
+            .anyMatch(c -> "Total des cotisations".equals(c.getLabel()));
+    }
+
+    @Test
+    void totalSuperieurALaSomme_neConclutPas() {
+        // Une retenue a montant fixe n'a aucun taux qui permette de la confirmer :
+        // la somme est alors incomplete, et accuser serait injustifie.
+        AnalysisResult.Check check = findCheck(service.analyzeCalculations(
+            BULLETIN_TROIS_NETS.replace("TOTAL BRUT 3 750,00",
+                "TOTAL BRUT 3 750,00\nTOTAL COTISATIONS 858,15\nTitres restaurant 50,00"),
+            docInfo("3750.00", "2728.35"), true), "Total des cotisations");
+
+        assertThat(check.getStatus()).isEqualTo("OK");
+    }
+
+    @Test
+    void totalPatronal_nEstPasPrisPourLeTotalSalarial() {
+        String text = "TOTAL COTISATIONS PATRONALES 1 537,50\n"
+            + BULLETIN_TROIS_NETS.replace("TOTAL BRUT 3 750,00",
+                "TOTAL BRUT 3 750,00\nTOTAL COTISATIONS 808,15");
+
+        assertThat(findCheck(service.analyzeCalculations(
+            text, docInfo("3750.00", "2728.35"), true), "Total des cotisations")
+            .getStatus()).isEqualTo("OK");
+    }
+
+    // ── Date de paiement ─────────────────────────────────────────────────────
+
+    @Test
+    void dateDePaiementInexistante_estDetectee() {
+        AnalysisResult.Check check = findCheck(service.analyzeCalculations(
+            "Date de paiement 31/02/2026\n" + BULLETIN_SAIN,
+            docInfo("3200.00", "2527.86"), true), "Date de paiement");
+
+        assertThat(check.getStatus()).isEqualTo("FAILED");
+        assertThat(check.getDetail()).contains("31/02/2026");
+    }
+
+    @Test
+    void dateDePaiementValide_estOK() {
+        assertThat(findCheck(service.analyzeCalculations(
+            "Date de paiement 28/02/2026\n" + BULLETIN_SAIN,
+            docInfo("3200.00", "2527.86"), true), "Date de paiement")
+            .getStatus()).isEqualTo("OK");
+    }
+
+    @Test
+    void anneeSurDeuxChiffres_estAcceptee() {
+        assertThat(findCheck(service.analyzeCalculations(
+            "Salaire versé le 28/02/26\n" + BULLETIN_SAIN,
+            docInfo("3200.00", "2527.86"), true), "Date de paiement")
+            .getStatus()).isEqualTo("OK");
+    }
+
+    @Test
+    void sansDateDePaiement_aucunControle() {
+        assertThat(service.analyzeCalculations(
+            BULLETIN_SAIN, docInfo("3200.00", "2527.86"), true))
+            .noneMatch(c -> "Date de paiement".equals(c.getLabel()));
+    }
+
+    // ── Année des cumuls ─────────────────────────────────────────────────────
+
+    private AnalysisResult.DocumentInfo avecPeriode(String periode) {
+        return AnalysisResult.DocumentInfo.builder()
+            .salaireBrut("3200.00").salaireNet("2527.86").periode(periode).build();
+    }
+
+    @Test
+    void cumulsDUneAutreAnnee_sontDetectes() {
+        // Les cumuls repartent de zero chaque janvier : un bulletin de septembre
+        // 2026 ne peut pas afficher des cumuls 2025.
+        AnalysisResult.Check check = findCheck(service.analyzeCalculations(
+            "Cumul brut 2025 2 000,00\n" + BULLETIN_SAIN,
+            avecPeriode("Septembre 2026"), true), "Année des cumuls");
+
+        assertThat(check.getStatus()).isEqualTo("FAILED");
+        assertThat(check.getDetail()).contains("2025").contains("Septembre 2026");
+    }
+
+    @Test
+    void cumulsDeLAnneeDeLaPeriode_sontOK() {
+        assertThat(findCheck(service.analyzeCalculations(
+            "Cumul brut 2026 33 750,00\n" + BULLETIN_SAIN,
+            avecPeriode("Septembre 2026"), true), "Année des cumuls")
+            .getStatus()).isEqualTo("OK");
+    }
+
+    @Test
+    void periodeDeReferenceDesConges_nEstPasUnCumulAnnuel() {
+        // "Cumul annuel sur la période de référence du 01/06/2025 au 31/05/2026" :
+        // deux annees sur la ligne, ce n'est pas un cumul de l'annee civile.
+        assertThat(service.analyzeCalculations(
+            "Cumul annuel sur la période de référence du 01/06/2025 au 31/05/2026: 022,50\n"
+                + BULLETIN_SAIN,
+            avecPeriode("Février 2026"), true))
+            .noneMatch(c -> "Année des cumuls".equals(c.getLabel()));
+    }
+
+    @Test
+    void sansPeriode_aucunControleDeLAnnee() {
+        assertThat(service.analyzeCalculations(
+            "Cumul brut 2025 2 000,00\n" + BULLETIN_SAIN,
+            docInfo("3200.00", "2527.86"), true))
+            .noneMatch(c -> "Année des cumuls".equals(c.getLabel()));
+    }
+
     // ── Assiette des cotisations déplafonnées ────────────────────────────────
 
     // Mise en page reelle : la base precede le taux et le montant sur la ligne.

@@ -68,13 +68,7 @@ public class SalaryCalculationService {
 
         // Sur la ligne de total, la part salariale precede la part patronale :
         // on prend donc le premier montant, pas le plus grand.
-        Double totalCotisations = extractFirstAmountOnSameLine(lines,
-            "total cotisations et contributions salariales",
-            "total des cotisations et contributions salariales",
-            "total cotisations salariales", "total retenues salariales",
-            "total des cotisations et contributions", "montant total des cotisations",
-            "total des cotisations", "total prelevements salariales",
-            "total charges salariales");
+        Double totalCotisations = extractTotalCotisationsSalariales(lines);
 
         // Net social extracted independently — used to cross-validate NET À PAYER
         Double netSocial = extractAmountNearLabel(lines,
@@ -293,6 +287,19 @@ public class SalaryCalculationService {
         AnalysisResult.Check assiette = checkAssietteDeplafonnee(lines, text, salaireBrut);
         if (assiette != null) checks.add(assiette);
 
+        // Check 10: le total affiché des cotisations = somme de ses lignes
+        AnalysisResult.Check totalCoherent = checkTotalCotisations(text, totalCotisations);
+        if (totalCoherent != null) checks.add(totalCoherent);
+
+        // Check 11: la date de paiement existe au calendrier
+        AnalysisResult.Check dateCheck = checkDateDePaiement(lines);
+        if (dateCheck != null) checks.add(dateCheck);
+
+        // Check 12: l'année des cumuls correspond à celle de la période
+        AnalysisResult.Check anneeCheck = checkAnneeDesCumuls(
+            lines, docInfo != null ? docInfo.getPeriode() : null);
+        if (anneeCheck != null) checks.add(anneeCheck);
+
         // Grandeurs fiscales exposees au reste du pipeline. Le rapprochement avec
         // l'avis d'imposition porte sur le net imposable, pas sur le net a payer :
         // sans elles, ce montant doit etre saisi a la main.
@@ -302,6 +309,194 @@ public class SalaryCalculationService {
         }
 
         return checks;
+    }
+
+    // ── Total des cotisations, date, annee des cumuls ────────────────────────
+
+    // Du libelle le plus explicite au plus court. "total cotisations" sans autre
+    // mot figure sur des bulletins reels et manquait a cette liste, si bien que
+    // le total n'y etait pas lu du tout.
+    private static final List<String> LABELS_TOTAL_SALARIAL = List.of(
+        "total cotisations et contributions salariales",
+        "total des cotisations et contributions salariales",
+        "total cotisations salariales", "total retenues salariales",
+        "total des cotisations et contributions", "montant total des cotisations",
+        "total des cotisations", "total cotisations",
+        "total prelevements salariales", "total charges salariales");
+
+    /**
+     * Total des cotisations salariales affiche sur le document.
+     *
+     * Sur la ligne de total, la part salariale precede la part patronale : on
+     * prend donc le premier montant. Les lignes de total patronal sont ecartees,
+     * les libelles les plus courts de la liste pouvant s'y retrouver.
+     */
+    private Double extractTotalCotisationsSalariales(String[] lines) {
+        for (String label : LABELS_TOTAL_SALARIAL) {
+            for (String line : lines) {
+                String norm = normalizeDiacritics(line);
+                if (!norm.contains(label)) continue;
+                if (norm.contains("patronal") || norm.contains("employeur")) continue;
+                Double montant = extractFirstAmountOnSameLine(new String[]{line}, label);
+                if (montant != null) return montant;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Le total affiche des cotisations salariales egale la somme de ses lignes.
+     *
+     * Seul l'ecart dans un sens est signale : un total inferieur a la somme des
+     * lignes qu'il agrege est impossible. L'inverse arrive legitimement, des
+     * retenues a montant fixe n'ayant aucun taux a partir duquel les confirmer —
+     * la somme est alors incomplete, et accuser serait injustifie.
+     *
+     * Le controle ne s'exprime donc que sur les bulletins dont les taux portent
+     * un signe pourcent, seuls a permettre la confirmation ligne par ligne. Il
+     * reste muet sur les autres plutot que d'y deviner une colonne.
+     */
+    private AnalysisResult.Check checkTotalCotisations(String text, Double totalAffiche) {
+        if (totalAffiche == null || totalAffiche <= 0) return null;
+
+        double somme = 0;
+        int count = 0;
+        for (String line : text.split("\\r?\\n")) {
+            Double montant = montantSalarialConfirme(line);
+            if (montant != null && montant > 0) {
+                somme += montant;
+                count++;
+            }
+        }
+        if (count < 3) return null;
+
+        double tolerance = Math.max(1.0, totalAffiche * 0.005);
+        if (somme - totalAffiche > tolerance) {
+            return AnalysisResult.Check.builder()
+                .category("Calculs")
+                .label("Total des cotisations")
+                .status("FAILED")
+                .detail(String.format(
+                    "Total des cotisations salariales affiché (%.2f€) inférieur de %.2f€"
+                        + " à la somme de ses propres lignes (%.2f€, %d lignes) —"
+                        + " impossible, le total a probablement été minoré pour"
+                        + " justifier un net plus élevé",
+                    totalAffiche, somme - totalAffiche, somme, count))
+                .build();
+        }
+
+        return AnalysisResult.Check.builder()
+            .category("Calculs")
+            .label("Total des cotisations")
+            .status("OK")
+            .detail(String.format(
+                "Total des cotisations salariales (%.2f€) conforme à la somme de ses"
+                    + " lignes (%.2f€, %d lignes)",
+                totalAffiche, somme, count))
+            .build();
+    }
+
+    // "Date de paiement 31/02/2026", "Salaire versé le 28/02/26".
+    private static final Pattern DATE_DE_PAIEMENT = Pattern.compile(
+        "(?i)(?:date de (?:paiement|versement)|(?:salaire\\s+)?vers[eé] le|pay[eé] le)"
+            + "[^0-9]{0,12}([0-9]{2})/([0-9]{2})/([0-9]{2,4})");
+
+    /**
+     * La date de paiement existe au calendrier.
+     *
+     * Un 31 fevrier trahit une saisie fabriquee : aucun logiciel de paie ne
+     * produit une date inexistante, alors qu'un faussaire qui retouche un
+     * bulletin ne verifie pas le calendrier. Le controle ne juge que l'existence
+     * de la date, pas sa vraisemblance : un versement anticipe ou tardif se
+     * rencontre couramment.
+     */
+    private AnalysisResult.Check checkDateDePaiement(String[] lines) {
+        for (String line : lines) {
+            Matcher m = DATE_DE_PAIEMENT.matcher(line);
+            if (!m.find()) continue;
+
+            int jour = Integer.parseInt(m.group(1));
+            int mois = Integer.parseInt(m.group(2));
+            int annee = Integer.parseInt(m.group(3));
+            if (annee < 100) annee += 2000;
+
+            try {
+                java.time.LocalDate.of(annee, mois, jour);
+            } catch (java.time.DateTimeException e) {
+                return AnalysisResult.Check.builder()
+                    .category("Calculs")
+                    .label("Date de paiement")
+                    .status("FAILED")
+                    .detail(String.format(
+                        "Date de paiement inexistante : %02d/%02d/%d — aucun logiciel de"
+                            + " paie ne produit une telle date",
+                        jour, mois, annee))
+                    .build();
+            }
+
+            return AnalysisResult.Check.builder()
+                .category("Calculs")
+                .label("Date de paiement")
+                .status("OK")
+                .detail(String.format("Date de paiement valide : %02d/%02d/%d",
+                    jour, mois, annee))
+                .build();
+        }
+        return null;
+    }
+
+    // "Cumul brut 2026 33 750,00" : l'annee suit immediatement le libelle.
+    private static final Pattern ANNEE_DU_CUMUL = Pattern.compile(
+        "(?i)cumul[^0-9\\n]{0,30}(20[0-9]{2})");
+
+    private static final Pattern ANNEE = Pattern.compile("(20[0-9]{2})");
+
+    /**
+     * L'annee portee par les cumuls est celle de la periode du bulletin.
+     *
+     * Les cumuls repartent de zero chaque janvier : un bulletin de septembre 2026
+     * ne peut pas afficher des cumuls 2025. Le controle ne s'exprime que sur les
+     * lignes ne citant qu'une seule annee : la periode de reference des conges
+     * payes en cite deux — "du 01/06/2025 au 31/05/2026" — et n'est pas un cumul
+     * annuel.
+     */
+    private AnalysisResult.Check checkAnneeDesCumuls(String[] lines, String periode) {
+        if (periode == null) return null;
+        Matcher periodeAnnee = ANNEE.matcher(periode);
+        if (!periodeAnnee.find()) return null;
+        int anneeAttendue = Integer.parseInt(periodeAnnee.group(1));
+
+        for (String line : lines) {
+            Matcher m = ANNEE_DU_CUMUL.matcher(line);
+            if (!m.find()) continue;
+
+            // Plusieurs annees sur la ligne : periode de reference, pas un cumul.
+            Matcher toutes = ANNEE.matcher(line);
+            Set<String> annees = new LinkedHashSet<>();
+            while (toutes.find()) annees.add(toutes.group(1));
+            if (annees.size() != 1) continue;
+
+            int anneeCumul = Integer.parseInt(m.group(1));
+            if (anneeCumul != anneeAttendue) {
+                return AnalysisResult.Check.builder()
+                    .category("Calculs")
+                    .label("Année des cumuls")
+                    .status("FAILED")
+                    .detail(String.format(
+                        "Cumuls annoncés pour %d alors que la période du bulletin est %s"
+                            + " — les cumuls repartent de zéro chaque janvier",
+                        anneeCumul, periode.trim()))
+                    .build();
+            }
+            return AnalysisResult.Check.builder()
+                .category("Calculs")
+                .label("Année des cumuls")
+                .status("OK")
+                .detail(String.format("Cumuls de l'année %d, cohérents avec la période",
+                    anneeCumul))
+                .build();
+        }
+        return null;
     }
 
     // ── Check 9 : assiette des cotisations deplafonnees ──────────────────────
