@@ -31,4 +31,5 @@ signal separe par `|`.
 
 Le SIRET etant invalide par construction, le controle SIRET echoue sur les sept
 documents, y compris la reference : ce n'est pas un faux positif mais une
-propriete du jeu de tests.
+propriete du jeu de tests. Il en va de meme du marquage « DOCUMENT FICTIF »,
+que le controle des mentions de specimen signale sur les sept documents.

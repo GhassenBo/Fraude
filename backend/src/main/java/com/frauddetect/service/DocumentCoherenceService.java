@@ -14,7 +14,9 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Confronte un document a lui-meme.
+ * Controles portant sur le texte du document, hors calculs : les noms qu'il
+ * repete d'une zone a l'autre, et les mentions par lesquelles il se declare
+ * lui-meme sans valeur.
  *
  * Un bulletin nomme plusieurs fois l'employeur et le salarie : en tete, dans le
  * bloc d'identification, dans le recapitulatif de paiement. Un faussaire
@@ -77,11 +79,79 @@ public class DocumentCoherenceService {
         if (text == null || text.isBlank()) return List.of();
 
         List<AnalysisResult.Check> checks = new ArrayList<>();
+        AnalysisResult.Check mention = checkMentionDeSpecimen(text);
+        if (mention != null) checks.add(mention);
         AnalysisResult.Check employeur = checkEmployeur(text);
         if (employeur != null) checks.add(employeur);
         AnalysisResult.Check salarie = checkIdentiteSalarie(text);
         if (salarie != null) checks.add(salarie);
         return checks;
+    }
+
+    // ── Mentions de specimen ─────────────────────────────────────────────────
+
+    /**
+     * Mentions par lesquelles un document se declare sans valeur.
+     *
+     * "Exemple de bulletin de paie" en fait partie : c'est la signature des
+     * generateurs en ligne, et cinq des neuf bulletins reels servant de reference
+     * la portent en pied de page. Un tel document n'est pas un justificatif de
+     * revenus, quelle que soit la coherence de ses calculs — et c'est precisement
+     * la piece qu'un candidat telecharge en quelques secondes.
+     */
+    private static final List<String> MENTIONS_EXPLICITES = List.of(
+        "specimen", "document fictif", "donnees fictives", "identite fictive",
+        "ne pas utiliser", "non valable", "ne constitue pas un justificatif",
+        "exemple de bulletin", "exemple de fiche de paie", "modele de bulletin",
+        "document de test", "environnement de test", "bulletin de test",
+        "echantillon", "factice", "sans valeur juridique");
+
+    /**
+     * Termes trop courants pour conclure seuls : une societe peut s'appeler Test,
+     * un libelle porter le mot demo. Deux d'entre eux au moins doivent se
+     * rencontrer pour que le document devienne douteux.
+     */
+    private static final List<String> TERMES_FAIBLES = List.of(
+        "test", "demo", "demonstration", "fictif", "fictive", "apercu",
+        "preview", "simule", "brouillon", "a titre d'exemple");
+
+    /** Nombre de termes faibles distincts a partir duquel le doute s'installe. */
+    private static final int TERMES_FAIBLES_MIN = 2;
+
+    private AnalysisResult.Check checkMentionDeSpecimen(String text) {
+        String norm = normalize(text, true);
+
+        List<String> explicites = MENTIONS_EXPLICITES.stream()
+            .filter(norm::contains).toList();
+        if (!explicites.isEmpty()) {
+            return AnalysisResult.Check.builder()
+                .category("Structure")
+                .label("Mention de document sans valeur")
+                .status("FAILED")
+                .detail(String.format(
+                    "Le document se déclare lui-même sans valeur : « %s » — ce n'est"
+                        + " pas un justificatif de revenus, quelle que soit la"
+                        + " cohérence de ses calculs",
+                    String.join(" », « ", explicites)))
+                .build();
+        }
+
+        List<String> faibles = TERMES_FAIBLES.stream()
+            .filter(t -> Pattern.compile("\\b" + Pattern.quote(t) + "\\b",
+                Pattern.UNICODE_CHARACTER_CLASS).matcher(norm).find())
+            .toList();
+        if (faibles.size() >= TERMES_FAIBLES_MIN) {
+            return AnalysisResult.Check.builder()
+                .category("Structure")
+                .label("Mention de document sans valeur")
+                .status("WARNING")
+                .detail(String.format(
+                    "Le document porte %d mentions évoquant un exemple ou un essai :"
+                        + " %s — à vérifier, un bulletin authentique n'en comporte pas",
+                    faibles.size(), String.join(", ", faibles)))
+                .build();
+        }
+        return null;
     }
 
     // ── Employeur ────────────────────────────────────────────────────────────
