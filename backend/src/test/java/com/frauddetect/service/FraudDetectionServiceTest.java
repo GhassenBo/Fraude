@@ -35,7 +35,7 @@ class FraudDetectionServiceTest {
     void setUp() {
         service = new FraudDetectionService(
             pdfAnalyzer, siretService, salaryService,
-            aiAnalysisService, claudeVisionService,
+            aiAnalysisService, claudeVisionService, new DocumentCoherenceService(),
             userRepository, analysisRepository);
         ReflectionTestUtils.setField(service, "freeLimit", 10);
     }

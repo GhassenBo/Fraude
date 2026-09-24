@@ -25,6 +25,7 @@ public class FraudDetectionService {
     private final SalaryCalculationService salaryService;
     private final AiAnalysisService aiAnalysisService;
     private final ClaudeVisionService claudeVisionService;
+    private final DocumentCoherenceService coherenceService;
     private final UserRepository userRepository;
     private final AnalysisRepository analysisRepository;
 
@@ -36,6 +37,7 @@ public class FraudDetectionService {
                                   SalaryCalculationService salaryService,
                                   AiAnalysisService aiAnalysisService,
                                   ClaudeVisionService claudeVisionService,
+                                  DocumentCoherenceService coherenceService,
                                   UserRepository userRepository,
                                   AnalysisRepository analysisRepository) {
         this.pdfAnalyzer = pdfAnalyzer;
@@ -43,6 +45,7 @@ public class FraudDetectionService {
         this.salaryService = salaryService;
         this.aiAnalysisService = aiAnalysisService;
         this.claudeVisionService = claudeVisionService;
+        this.coherenceService = coherenceService;
         this.userRepository = userRepository;
         this.analysisRepository = analysisRepository;
     }
@@ -68,6 +71,9 @@ public class FraudDetectionService {
         // celle qui decele un net gonfle — ne s'executaient pas.
         allChecks.addAll(salaryService.analyzeCalculations(
             pdfData.rawText(), pdfData.documentInfo(), pdfData.netFromVision()));
+
+        // Confrontation du document a lui-meme : noms repetes d'une zone a l'autre.
+        allChecks.addAll(coherenceService.analyze(pdfData.rawText()));
 
         // AI analysis (GPT-4) — optional, runs only if API key is configured
         List<AnalysisResult.Check> aiChecks = aiAnalysisService.analyze(pdfData.rawText(), pdfData.documentInfo());

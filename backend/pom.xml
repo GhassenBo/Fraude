@@ -17,6 +17,11 @@
 
     <properties>
         <java.version>17</java.version>
+        <!-- Sans cela, Maven compile avec l'encodage natif de la machine. Sur un
+             hote en ASCII, tous les accents des messages francais sont corrompus
+             a la compilation, y compris dans l'image Docker de production. -->
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
     </properties>
 
     <dependencies>

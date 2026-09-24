@@ -35,7 +35,8 @@ class DossierVerificationServiceTest {
         // sollicites ici, et ils ne touchent aucune dependance.
         FraudDetectionService fraudDetectionService = new FraudDetectionService(
             pdfAnalyzer, siretService, salaryService, aiAnalysisService,
-            claudeVisionService, userRepository, analysisRepository);
+            claudeVisionService, new DocumentCoherenceService(),
+            userRepository, analysisRepository);
         service = new DossierVerificationService(fraudDetectionService, taxService);
     }
 
