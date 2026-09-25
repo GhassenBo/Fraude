@@ -22,10 +22,55 @@ export default function App() {
   // du net imposable : la page de resultat a deja ete quittee a ce moment-la.
   const [bulletinFiscalCourant, setBulletinFiscalCourant] = useState(null);
 
+  /**
+   * Relit le profil jusqu'à ce que le passage en Pro soit enregistré.
+   *
+   * Le webhook Stripe arrive en général dans la seconde, mais rien ne le
+   * garantit : quatre tentatives espacées couvrent le cas courant sans
+   * s'acharner, et l'utilisateur peut de toute façon recharger la page.
+   */
+  const attendreLePlanPro = () => {
+    const delais = [1500, 4000, 8000, 15000];
+    delais.forEach((delai) => {
+      setTimeout(() => {
+        refreshMe().then((u) => {
+          if (u?.isPro) setUser(u);
+        }).catch(() => {});
+      }, delai);
+    });
+  };
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get('upgrade') === 'success') {
+
+    // Retour de Stripe. Le paramètre est retiré de l'adresse : sans cela, chaque
+    // rechargement rejouait le message et ramenait sur le tableau de bord.
+    const upgrade = params.get('upgrade');
+    if (upgrade === 'success') {
+      setNotice({
+        type: 'success',
+        text: 'Abonnement Pro activé. Vos analyses sont désormais illimitées.',
+      });
       setPage('dashboard');
+      // Stripe renvoie l'utilisateur avant d'avoir notifié le serveur : le plan
+      // n'est donc pas encore à jour à cet instant. Sans ces relectures, le
+      // tableau de bord afficherait FREE juste après un paiement réussi.
+      attendreLePlanPro();
+    } else if (upgrade === 'cancelled') {
+      setNotice({
+        type: 'error',
+        text: "Paiement annulé — aucun montant n'a été prélevé.",
+      });
+      setPage('pricing');
+    }
+
+    // Retour du portail de facturation Stripe.
+    if (params.get('page') === 'dashboard') {
+      setPage('dashboard');
+    }
+
+    if (upgrade || params.get('page')) {
+      window.history.replaceState({}, '', window.location.pathname);
     }
 
     if (params.get('session') === 'expiree') {

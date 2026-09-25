@@ -20,6 +20,13 @@ public class StripeController {
 
     @PostMapping("/checkout")
     public ResponseEntity<?> createCheckout(@AuthenticationPrincipal User user) {
+        if (!stripeService.isConfigured()) {
+            // Message explicite plutot que l'erreur brute de Stripe, que
+            // l'utilisateur prenait pour une panne du site.
+            return ResponseEntity.status(503).body(Map.of(
+                "error", "Le paiement en ligne n'est pas encore disponible."
+                    + " Écrivez-nous pour souscrire : /contact/"));
+        }
         try {
             String url = stripeService.createCheckoutSession(user);
             return ResponseEntity.ok(Map.of("url", url));

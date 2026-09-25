@@ -2,6 +2,7 @@ package com.frauddetect.controller;
 
 import com.frauddetect.dto.AuthDto;
 import com.frauddetect.entity.User;
+import com.frauddetect.util.FrontendUrl;
 import com.frauddetect.service.AuthService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Value;
@@ -71,7 +72,6 @@ public class AuthController {
 
     // FRONTEND_URL peut contenir plusieurs origines separees par des virgules (CORS).
     private String frontendOrigin() {
-        String first = baseUrl.split(",")[0].trim();
-        return first.endsWith("/") ? first.substring(0, first.length() - 1) : first;
+        return FrontendUrl.firstOrigin(baseUrl);
     }
 }

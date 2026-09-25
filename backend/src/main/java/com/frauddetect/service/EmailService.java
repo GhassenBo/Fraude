@@ -1,6 +1,7 @@
 package com.frauddetect.service;
 
 import com.frauddetect.entity.User;
+import com.frauddetect.util.FrontendUrl;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
@@ -115,13 +116,7 @@ public class EmailService {
     }
 
     private String verificationLink(String token) {
-        return firstOrigin(baseUrl) + "/api/auth/verify?token=" + token;
-    }
-
-    // FRONTEND_URL peut contenir plusieurs origines separees par des virgules (CORS).
-    private String firstOrigin(String url) {
-        String first = url.split(",")[0].trim();
-        return first.endsWith("/") ? first.substring(0, first.length() - 1) : first;
+        return FrontendUrl.firstOrigin(baseUrl) + "/api/auth/verify?token=" + token;
     }
 
     private String buildHtml(String link) {
