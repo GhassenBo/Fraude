@@ -53,6 +53,13 @@ public class AuthService {
 
         userRepository.save(user);
         emailService.sendVerificationEmail(user, verificationToken);
+        // Le compte est cree : une notification en echec ne doit pas renvoyer
+        // une erreur a quelqu'un dont l'inscription a pourtant abouti.
+        try {
+            emailService.notifieInscription(user.getEmail());
+        } catch (Exception e) {
+            System.err.println("[MAIL] Alerte d'inscription non envoyée : " + e.getMessage());
+        }
 
         String token = jwtUtil.generateToken(user.getEmail());
         return new AuthDto.AuthResponse(token, AuthDto.UserInfo.from(user, freeLimit));

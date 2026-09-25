@@ -26,6 +26,7 @@ public class FraudDetectionService {
     private final AiAnalysisService aiAnalysisService;
     private final ClaudeVisionService claudeVisionService;
     private final DocumentCoherenceService coherenceService;
+    private final EmailService emailService;
     private final UserRepository userRepository;
     private final AnalysisRepository analysisRepository;
 
@@ -38,6 +39,7 @@ public class FraudDetectionService {
                                   AiAnalysisService aiAnalysisService,
                                   ClaudeVisionService claudeVisionService,
                                   DocumentCoherenceService coherenceService,
+                                  EmailService emailService,
                                   UserRepository userRepository,
                                   AnalysisRepository analysisRepository) {
         this.pdfAnalyzer = pdfAnalyzer;
@@ -46,6 +48,7 @@ public class FraudDetectionService {
         this.aiAnalysisService = aiAnalysisService;
         this.claudeVisionService = claudeVisionService;
         this.coherenceService = coherenceService;
+        this.emailService = emailService;
         this.userRepository = userRepository;
         this.analysisRepository = analysisRepository;
     }
@@ -86,8 +89,24 @@ public class FraudDetectionService {
         String verdict = computeVerdictWithChecks(score, allChecks);
         String color = computeColor(score);
 
+        // Le compteur vaut zero avant l'increment : c'est donc ici, et nulle part
+        // ailleurs, qu'on sait qu'il s'agit de la premiere analyse de ce compte.
+        boolean premiereAnalyse = user.getDocumentsUsed() == 0;
+
         user.setDocumentsUsed(user.getDocumentsUsed() + 1);
         userRepository.save(user);
+
+        if (premiereAnalyse) {
+            // L'analyse est deja enregistree et le quota decompte : une
+            // notification qui echoue ne doit pas la faire perdre. EmailService
+            // avale deja ses erreurs, cette garde protege des evolutions futures.
+            try {
+                emailService.notifiePremiereAnalyse(user.getEmail(), score, verdict);
+            } catch (Exception e) {
+                System.err.println("[MAIL] Alerte de première analyse non envoyée : "
+                    + e.getMessage());
+            }
+        }
 
         analysisRepository.save(Analysis.builder()
             .user(user).filename(file.getOriginalFilename())

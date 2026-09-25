@@ -36,7 +36,7 @@ class FraudDetectionServiceTest {
         service = new FraudDetectionService(
             pdfAnalyzer, siretService, salaryService,
             aiAnalysisService, claudeVisionService, new DocumentCoherenceService(),
-            userRepository, analysisRepository);
+            new EmailService(null), userRepository, analysisRepository);
         ReflectionTestUtils.setField(service, "freeLimit", 10);
     }
 
@@ -177,6 +177,94 @@ class FraudDetectionServiceTest {
 
     private int invokeComputeScore(List<AnalysisResult.Check> checks) {
         return (int) invoke("computeScore", List.class, checks);
+    }
+
+    // ── Alerte a la premiere analyse ─────────────────────────────────────────
+
+    /** Messagerie de test : memorise les notifications au lieu de les emettre. */
+    private static class MessagerieDeTest extends EmailService {
+        private final List<String> notifications = new ArrayList<>();
+        private boolean enPanne = false;
+
+        MessagerieDeTest() {
+            super(null);
+        }
+
+        @Override
+        public void notifiePremiereAnalyse(String email, int score, String verdict) {
+            if (enPanne) throw new RuntimeException("SMTP injoignable");
+            notifications.add(email + " " + score + " " + verdict);
+        }
+    }
+
+    private MessagerieDeTest messagerie;
+
+    private void analyseAvecMessagerie(int documentsDejaUtilises) throws Exception {
+        analyseAvecMessagerie(documentsDejaUtilises, false);
+    }
+
+    private void analyseAvecMessagerie(int documentsDejaUtilises, boolean enPanne)
+        throws Exception {
+        messagerie = new MessagerieDeTest();
+        messagerie.enPanne = enPanne;
+        FraudDetectionService avecMessagerie = new FraudDetectionService(
+            pdfAnalyzer, siretService, salaryService, aiAnalysisService,
+            claudeVisionService, new DocumentCoherenceService(), messagerie,
+            userRepository, analysisRepository);
+        ReflectionTestUtils.setField(avecMessagerie, "freeLimit", 10);
+
+        com.frauddetect.entity.User user = com.frauddetect.entity.User.builder()
+            .id(1L).email("nouveau@agence.fr").password("x")
+            .plan(com.frauddetect.entity.User.Plan.FREE)
+            .documentsUsed(documentsDejaUtilises).build();
+
+        org.mockito.Mockito.when(pdfAnalyzer.analyze(org.mockito.ArgumentMatchers.any()))
+            .thenReturn(new com.frauddetect.util.PdfAnalyzer.PdfAnalysisData(
+                "texte", new byte[]{1},
+                AnalysisResult.DocumentInfo.builder().build(), new ArrayList<>(), false));
+        org.mockito.Mockito.when(siretService.verify(
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+            .thenReturn(List.of());
+        org.mockito.Mockito.when(salaryService.analyzeCalculations(
+            org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.anyBoolean())).thenReturn(List.of());
+        org.mockito.Mockito.when(aiAnalysisService.analyze(
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+            .thenReturn(List.of());
+        org.mockito.Mockito.when(claudeVisionService.detectForgery(
+            org.mockito.ArgumentMatchers.any())).thenReturn(List.of());
+
+        avecMessagerie.analyze(new org.springframework.mock.web.MockMultipartFile(
+            "file", "bulletin.pdf", "application/pdf", new byte[]{1}), user);
+    }
+
+    @Test
+    void premiereAnalyse_declencheUneAlerte() throws Exception {
+        // Le compteur vaut zero avant l'increment : c'est le seul instant ou l'on
+        // sait qu'il s'agit du premier document de ce compte.
+        analyseAvecMessagerie(0);
+
+        assertThat(messagerie.notifications).hasSize(1);
+        assertThat(messagerie.notifications.get(0)).contains("nouveau@agence.fr");
+    }
+
+    @Test
+    void analysesSuivantes_neDeclenchentRien() throws Exception {
+        // Sinon chaque analyse enverrait un email, et l'alerte perdrait son sens.
+        analyseAvecMessagerie(1);
+
+        assertThat(messagerie.notifications).isEmpty();
+    }
+
+    @Test
+    void messagerieEnPanne_neFaitPasEchouerLAnalyse() throws Exception {
+        // A cet instant l'analyse est enregistree et le quota decompte : la
+        // perdre parce qu'un email n'est pas parti serait absurde, et couterait
+        // un document au client.
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(
+            () -> analyseAvecMessagerie(0, true));
+
+        assertThat(messagerie.notifications).isEmpty();
     }
 
     // ── Provenance du net a payer ────────────────────────────────────────────

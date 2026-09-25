@@ -36,7 +36,7 @@ class DossierVerificationServiceTest {
         FraudDetectionService fraudDetectionService = new FraudDetectionService(
             pdfAnalyzer, siretService, salaryService, aiAnalysisService,
             claudeVisionService, new DocumentCoherenceService(),
-            userRepository, analysisRepository);
+            new EmailService(null), userRepository, analysisRepository);
         service = new DossierVerificationService(fraudDetectionService, taxService);
     }
 

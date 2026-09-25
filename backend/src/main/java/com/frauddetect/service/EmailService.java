@@ -99,6 +99,64 @@ public class EmailService {
         }
     }
 
+    /**
+     * Previent l'exploitant qu'un compte vient d'etre cree.
+     *
+     * Destinee a l'exploitant et non a l'utilisateur : le service n'a aucun autre
+     * moyen de savoir que quelqu'un s'en sert, hors consultation de la base.
+     *
+     * L'envoi ne fait jamais echouer l'action qui l'a declenche : une inscription
+     * ne doit pas etre perdue parce qu'une notification n'est pas partie.
+     */
+    public void notifieInscription(String emailInscrit) {
+        notifie("Nouvelle inscription",
+            "Un compte vient d'être créé sur FraudDetect.\n\n"
+                + "Adresse : " + emailInscrit + "\n"
+                + "Date : " + horodatage() + "\n\n"
+                + "L'adresse n'est pas encore confirmée à cet instant : la personne"
+                + " doit cliquer sur le lien reçu avant de pouvoir lancer une analyse.");
+    }
+
+    /**
+     * Previent l'exploitant qu'un utilisateur vient d'analyser son premier
+     * document.
+     *
+     * Plus revelateur qu'une inscription : la personne a compris le produit et
+     * depose un vrai document. Le nom du fichier n'est pas transmis, il porte
+     * souvent le nom du salarie.
+     */
+    public void notifiePremiereAnalyse(String emailUtilisateur, int score, String verdict) {
+        notifie("Première analyse",
+            "Un utilisateur vient d'analyser son premier document.\n\n"
+                + "Adresse : " + emailUtilisateur + "\n"
+                + "Résultat : " + score + "/100 — " + verdict + "\n"
+                + "Date : " + horodatage());
+    }
+
+    /** Envoi vers l'exploitant, silencieux en cas d'echec. */
+    private void notifie(String sujet, String corps) {
+        if (!isEnabled()) return;
+
+        String destinataire = (contactTo == null || contactTo.isBlank()) ? from : contactTo;
+        try {
+            MimeMessage mime = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(mime, "UTF-8");
+            helper.setFrom(from, fromName);
+            helper.setTo(destinataire);
+            helper.setSubject("[FraudDetect] " + sujet);
+            helper.setText(corps);
+            mailSender.send(mime);
+        } catch (Exception e) {
+            System.err.println("[MAIL] Notification « " + sujet + " » non envoyée : "
+                + e.getMessage());
+        }
+    }
+
+    private String horodatage() {
+        return java.time.LocalDateTime.now()
+            .format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy à HH:mm"));
+    }
+
     /** Valeur utilisable dans un en-tete : sans saut de ligne, longueur bornee. */
     String enTete(String valeur) {
         if (valeur == null) return "";
