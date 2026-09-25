@@ -46,7 +46,7 @@ public class StripeService {
         Stripe.apiKey = apiKey;
         if (isConfigured()) {
             System.out.println("[STRIPE] ✓ Paiement actif"
-                + (apiKey.startsWith("sk_test") ? " (mode TEST)" : " (mode LIVE)"));
+                + (apiKey.contains("_test_") ? " (mode TEST)" : " (mode LIVE)"));
         } else {
             System.out.println("[STRIPE] Paiement inactif — clé ou identifiant de"
                 + " tarif absent ou encore à remplacer");
@@ -66,8 +66,20 @@ public class StripeService {
      * l'utilisateur, qui n'y comprenait rien et croyait a une panne.
      */
     public boolean isConfigured() {
-        return renseigne(apiKey) && apiKey.startsWith("sk_")
+        return renseigne(apiKey) && estUneCleStripe(apiKey)
             && renseigne(priceId) && priceId.startsWith("price_");
+    }
+
+    /**
+     * Prefixes des cles utilisables cote serveur.
+     *
+     * rk_ designe une cle restreinte, dont les autorisations sont limitees aux
+     * seules ressources necessaires. C'est la forme que Stripe propose par
+     * defaut sur un compte de production, et la plus sure : ne reconnaitre que
+     * sk_ aurait declare le paiement inactif avec une cle pourtant valide.
+     */
+    private boolean estUneCleStripe(String cle) {
+        return cle.startsWith("sk_") || cle.startsWith("rk_");
     }
 
     private boolean renseigne(String valeur) {

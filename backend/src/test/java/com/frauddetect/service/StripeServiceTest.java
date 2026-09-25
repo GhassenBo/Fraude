@@ -131,6 +131,50 @@ class StripeServiceTest {
         verify(userRepository, never()).save(any());
     }
 
+    // ── Detection de la configuration ────────────────────────────────────────
+
+    private StripeService configure(String cle, String prix) {
+        StripeService s = new StripeService(userRepository);
+        org.springframework.test.util.ReflectionTestUtils.setField(s, "apiKey", cle);
+        org.springframework.test.util.ReflectionTestUtils.setField(s, "priceId", prix);
+        return s;
+    }
+
+    @Test
+    void cleRestreinte_estAcceptee() {
+        // Stripe propose par defaut une cle restreinte, prefixee rk_, sur un
+        // compte de production. Ne reconnaitre que sk_ declarait le paiement
+        // inactif avec une cle pourtant valide.
+        assertThat(configure("rk_live_abc123", "price_abc").isConfigured()).isTrue();
+    }
+
+    @Test
+    void cleSecreteClassique_estAcceptee() {
+        assertThat(configure("sk_live_abc123", "price_abc").isConfigured()).isTrue();
+    }
+
+    @Test
+    void valeursLivreesParDefaut_neComptentPas() {
+        // Les marques a remplacer ne doivent pas passer pour une configuration.
+        assertThat(configure("sk_test_REPLACE_WITH_YOUR_STRIPE_SECRET_KEY",
+            "price_REPLACE_WITH_YOUR_PRICE_ID").isConfigured()).isFalse();
+        assertThat(configure("YOUR_STRIPE_API_KEY_HERE", "price_abc")
+            .isConfigured()).isFalse();
+    }
+
+    @Test
+    void identifiantDeProduitAuLieuDuTarif_estRefuse() {
+        // prod_ designe le produit, price_ le tarif : seul le second sert au
+        // tunnel de paiement, et la confusion est facile.
+        assertThat(configure("rk_live_abc123", "prod_abc").isConfigured()).isFalse();
+    }
+
+    @Test
+    void cleAbsente_nActivePasLePaiement() {
+        assertThat(configure("", "price_abc").isConfigured()).isFalse();
+        assertThat(configure(null, "price_abc").isConfigured()).isFalse();
+    }
+
     // ── Origine du frontend ──────────────────────────────────────────────────
 
     @Test
