@@ -1,11 +1,135 @@
 package com.frauddetect.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.frauddetect.entity.User;
+import com.frauddetect.repository.UserRepository;
 import com.frauddetect.util.FrontendUrl;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
+@ExtendWith(MockitoExtension.class)
 class StripeServiceTest {
+
+    @Mock private UserRepository userRepository;
+    private StripeService service;
+
+    @BeforeEach
+    void setUp() {
+        service = new StripeService(userRepository);
+    }
+
+    private User client() {
+        return User.builder()
+            .id(1L).email("gestionnaire@agence.fr").password("x")
+            .plan(User.Plan.FREE).documentsUsed(4)
+            .stripeCustomerId("cus_123").build();
+    }
+
+    private com.fasterxml.jackson.databind.JsonNode json(String contenu) throws Exception {
+        return new ObjectMapper().readTree(contenu);
+    }
+
+    // ── Traitement des evenements ────────────────────────────────────────────
+
+    @Test
+    void paiementAboutit_faitPasserEnPro() throws Exception {
+        // Charge telle que Stripe l'envoie : les champs lus sont ceux du JSON
+        // signe, independamment de la version d'API du compte.
+        User user = client();
+        when(userRepository.findByStripeCustomerId("cus_123")).thenReturn(Optional.of(user));
+
+        service.traiterEvenement("checkout.session.completed",
+            json("{\"customer\":\"cus_123\",\"subscription\":\"sub_456\"}"));
+
+        assertThat(user.getPlan()).isEqualTo(User.Plan.PRO);
+        assertThat(user.getStripeSubscriptionId()).isEqualTo("sub_456");
+        assertThat(user.getProSince()).isNotNull();
+        verify(userRepository).save(user);
+    }
+
+    @Test
+    void abonnementSupprime_faitRevenirEnGratuit() throws Exception {
+        User user = client();
+        user.setPlan(User.Plan.PRO);
+        user.setStripeSubscriptionId("sub_456");
+        when(userRepository.findByStripeSubscriptionId("sub_456")).thenReturn(Optional.of(user));
+
+        service.traiterEvenement("customer.subscription.deleted",
+            json("{\"id\":\"sub_456\",\"status\":\"canceled\"}"));
+
+        assertThat(user.getPlan()).isEqualTo(User.Plan.FREE);
+        assertThat(user.getStripeSubscriptionId()).isNull();
+    }
+
+    @Test
+    void abonnementImpaye_fermeLAcces() throws Exception {
+        // Le cas que l'ancien code ignorait : seule la suppression etait ecoutee,
+        // un abonnement impaye laissait donc l'acces Pro indefiniment.
+        User user = client();
+        user.setPlan(User.Plan.PRO);
+        user.setStripeSubscriptionId("sub_456");
+        when(userRepository.findByStripeSubscriptionId("sub_456")).thenReturn(Optional.of(user));
+
+        service.traiterEvenement("customer.subscription.updated",
+            json("{\"id\":\"sub_456\",\"status\":\"unpaid\"}"));
+
+        assertThat(user.getPlan()).isEqualTo(User.Plan.FREE);
+    }
+
+    @Test
+    void relanceEnCours_conserveLAcces() throws Exception {
+        User user = client();
+        user.setPlan(User.Plan.PRO);
+        user.setStripeSubscriptionId("sub_456");
+        when(userRepository.findByStripeSubscriptionId("sub_456")).thenReturn(Optional.of(user));
+
+        service.traiterEvenement("customer.subscription.updated",
+            json("{\"id\":\"sub_456\",\"status\":\"past_due\"}"));
+
+        assertThat(user.getPlan()).isEqualTo(User.Plan.PRO);
+        // Rien n'a change : inutile d'ecrire en base.
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    void champsSupplementaires_sontIgnores() throws Exception {
+        // Une version d'API recente ajoute des champs : ils ne doivent rien
+        // casser, c'est tout l'interet de lire le JSON plutot que les modeles.
+        User user = client();
+        when(userRepository.findByStripeCustomerId("cus_123")).thenReturn(Optional.of(user));
+
+        service.traiterEvenement("checkout.session.completed",
+            json("{\"customer\":\"cus_123\",\"subscription\":\"sub_456\","
+                + "\"champ_futur\":{\"imbrique\":true},\"amount_total\":4900}"));
+
+        assertThat(user.getPlan()).isEqualTo(User.Plan.PRO);
+    }
+
+    @Test
+    void identifiantManquant_neFaitRien() throws Exception {
+        service.traiterEvenement("checkout.session.completed", json("{\"subscription\":null}"));
+        service.traiterEvenement("customer.subscription.deleted", json("{}"));
+
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    void evenementNonEcoute_estIgnore() throws Exception {
+        service.traiterEvenement("invoice.created", json("{\"id\":\"in_1\"}"));
+
+        verify(userRepository, never()).save(any());
+    }
 
     // ── Origine du frontend ──────────────────────────────────────────────────
 

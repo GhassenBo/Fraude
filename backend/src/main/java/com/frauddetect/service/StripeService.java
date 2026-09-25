@@ -5,7 +5,10 @@ import com.frauddetect.repository.UserRepository;
 import com.frauddetect.util.FrontendUrl;
 import com.stripe.Stripe;
 import com.stripe.exception.StripeException;
-import com.stripe.model.*;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.stripe.model.Customer;
+import com.stripe.model.Event;
 import com.stripe.model.checkout.Session;
 import com.stripe.net.Webhook;
 import com.stripe.param.CustomerCreateParams;
@@ -16,7 +19,6 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.Map;
-import java.util.Optional;
 
 @Service
 public class StripeService {
@@ -123,6 +125,20 @@ public class StripeService {
         return portalSession.getUrl();
     }
 
+    /**
+     * Traite un evenement Stripe, signature verifiee.
+     *
+     * Les champs sont lus directement dans le JSON signe plutot que dans les
+     * classes de la bibliotheque. Le compte Stripe fixe sa propre version d'API
+     * — 2026-08-26 ici, sans possibilite d'en choisir une plus ancienne — quand
+     * la bibliotheque en attend une de 2023. Deserialiser les evenements dans
+     * ses modeles reviendrait a dependre d'un alignement que rien ne garantit et
+     * qui se rompra au prochain changement de version.
+     *
+     * Les quatre champs utilises — l'identifiant du client, celui de
+     * l'abonnement, son statut — sont stables depuis les origines de l'API, et
+     * la signature garantit deja que la charge vient bien de Stripe.
+     */
     public void handleWebhook(String payload, String sigHeader) throws Exception {
         Event event;
         try {
@@ -131,24 +147,22 @@ public class StripeService {
             throw new IllegalArgumentException("Webhook signature invalide");
         }
 
-        Optional<StripeObject> objet = deserialize(event);
-        if (objet.isEmpty()) {
-            // Acquitte quand meme : une reemission ne changerait rien.
-            System.err.println("[STRIPE] Événement " + event.getType()
-                + " illisible — version d'API incompatible");
-            return;
-        }
+        JsonNode objet = new ObjectMapper().readTree(payload).path("data").path("object");
+        traiterEvenement(event.getType(), objet);
+    }
 
-        switch (event.getType()) {
+    /** Separe de la verification de signature, qui exige une vraie cle Stripe. */
+    void traiterEvenement(String type, JsonNode objet) {
+        switch (type) {
             case "checkout.session.completed" ->
-                handleCheckoutCompleted((Session) objet.get());
+                activerAbonnement(texte(objet, "customer"), texte(objet, "subscription"));
             case "customer.subscription.deleted" ->
-                handleSubscriptionCancelled((Subscription) objet.get());
+                cloturerAbonnement(texte(objet, "id"));
             // Fin d'abonnement autrement que par suppression : resiliation en fin
             // de periode, echecs de paiement repetes, abonnement jamais finalise.
             // Sans ce cas, un abonnement impaye laissait l'acces Pro indefiniment.
             case "customer.subscription.updated" ->
-                handleSubscriptionUpdated((Subscription) objet.get());
+                majAbonnement(texte(objet, "id"), texte(objet, "status"));
             default -> {
                 // Tout autre evenement est acquitte sans traitement : Stripe
                 // cesse alors de le reemettre.
@@ -156,24 +170,13 @@ public class StripeService {
         }
     }
 
-    /**
-     * Objet porte par l'evenement.
-     *
-     * getObject() rend un Optional vide quand la version d'API de l'evenement
-     * differe de celle attendue par la bibliotheque — cas frequent, le compte
-     * Stripe fixant sa propre version. La deserialisation non verifiee est la
-     * voie documentee pour ce cas ; si elle echoue a son tour, l'evenement est
-     * acquitte sans traitement plutot que refuse, une reemission ne pouvant pas
-     * mieux reussir que la premiere tentative.
-     */
-    private Optional<StripeObject> deserialize(Event event) {
-        var deserializer = event.getDataObjectDeserializer();
-        if (deserializer.getObject().isPresent()) return deserializer.getObject();
-        try {
-            return Optional.of(deserializer.deserializeUnsafe());
-        } catch (Exception e) {
-            return Optional.empty();
-        }
+    /** @return null plutot qu'une chaine vide, pour ne jamais chercher un
+     *          abonnement dont l'identifiant serait vide */
+    private String texte(JsonNode objet, String champ) {
+        JsonNode valeur = objet.path(champ);
+        if (valeur.isMissingNode() || valeur.isNull()) return null;
+        String s = valeur.asText("").trim();
+        return s.isEmpty() ? null : s;
     }
 
     /** Statuts qui ouvrent l'acces. past_due couvre les relances de Stripe, qui
@@ -184,35 +187,39 @@ public class StripeService {
             || "past_due".equals(status);
     }
 
-    private void handleSubscriptionUpdated(Subscription subscription) {
-        userRepository.findByStripeSubscriptionId(subscription.getId()).ifPresent(user -> {
-            boolean pro = donneAccesPro(subscription.getStatus());
+    private void activerAbonnement(String customerId, String subscriptionId) {
+        if (customerId == null) return;
+        userRepository.findByStripeCustomerId(customerId).ifPresent(user -> {
+            user.setPlan(User.Plan.PRO);
+            user.setStripeSubscriptionId(subscriptionId);
+            user.setProSince(LocalDateTime.now());
+            userRepository.save(user);
+            System.out.println("[STRIPE] Abonnement activé");
+        });
+    }
+
+    private void cloturerAbonnement(String subscriptionId) {
+        if (subscriptionId == null) return;
+        userRepository.findByStripeSubscriptionId(subscriptionId).ifPresent(user -> {
+            user.setPlan(User.Plan.FREE);
+            user.setStripeSubscriptionId(null);
+            userRepository.save(user);
+            System.out.println("[STRIPE] Abonnement clôturé");
+        });
+    }
+
+    private void majAbonnement(String subscriptionId, String status) {
+        if (subscriptionId == null) return;
+        userRepository.findByStripeSubscriptionId(subscriptionId).ifPresent(user -> {
+            boolean pro = donneAccesPro(status);
             User.Plan attendu = pro ? User.Plan.PRO : User.Plan.FREE;
             if (user.getPlan() == attendu) return;
 
             user.setPlan(attendu);
             if (!pro) user.setStripeSubscriptionId(null);
             userRepository.save(user);
-            System.out.println("[STRIPE] Abonnement " + subscription.getStatus()
+            System.out.println("[STRIPE] Abonnement " + status
                 + " — plan basculé sur " + attendu);
-        });
-    }
-
-    private void handleCheckoutCompleted(Session session) {
-        String customerId = session.getCustomer();
-        userRepository.findByStripeCustomerId(customerId).ifPresent(user -> {
-            user.setPlan(User.Plan.PRO);
-            user.setStripeSubscriptionId(session.getSubscription());
-            user.setProSince(LocalDateTime.now());
-            userRepository.save(user);
-        });
-    }
-
-    private void handleSubscriptionCancelled(Subscription subscription) {
-        userRepository.findByStripeSubscriptionId(subscription.getId()).ifPresent(user -> {
-            user.setPlan(User.Plan.FREE);
-            user.setStripeSubscriptionId(null);
-            userRepository.save(user);
         });
     }
 }
