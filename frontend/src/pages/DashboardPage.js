@@ -78,7 +78,7 @@ export default function DashboardPage({ user, onUpgrade, onAnalyze }) {
             </div>
           )}
           <button className="upgrade-btn" onClick={onUpgrade}>
-            Passer au plan Pro — 49€/mois →
+            Passer au plan Pro — 39€/mois →
           </button>
         </div>
       )}

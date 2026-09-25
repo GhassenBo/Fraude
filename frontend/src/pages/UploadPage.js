@@ -279,7 +279,7 @@ export default function UploadPage({ onResult, onBatchResult, user, bulletinFisc
           <div className="quota-exceeded">
             <div className="qe-title">🔒 Limite gratuite atteinte</div>
             <div className="qe-desc">Vous avez utilisé vos 10 analyses gratuites. Passez au plan Pro pour continuer.</div>
-            <button className="qe-btn" onClick={onUpgrade}>Passer Pro — 49€/mois →</button>
+            <button className="qe-btn" onClick={onUpgrade}>Passer Pro — 39€/mois →</button>
           </div>
         )}
 

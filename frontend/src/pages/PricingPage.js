@@ -62,7 +62,7 @@ export default function PricingPage({ user, onBack }) {
           <div className="plan-header">
             <div className="plan-name">Pro</div>
             <div className="plan-price">
-              <span className="price-amount">49€</span>
+              <span className="price-amount">39€</span>
               <span className="price-period">/ mois · HT</span>
             </div>
           </div>
